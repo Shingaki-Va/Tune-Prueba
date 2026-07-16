@@ -10,7 +10,7 @@ const FAM_COLOR = {
 //  Pegá entre las comillas la URL de tu Apps Script (la que termina en /exec).
 //  Mientras esté vacía, la página guarda los datos solo en este navegador.
 // ===========================================================================
-const API_URL = "https://script.google.com/macros/s/AKfycbzVhuxDlxvSK-Gr_cypuV_Aw34CtjA1IEOOMiXmN4K02J6Fk9g9qYDvBq1YHrqHBYlGdw/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbzvuXRm0edQf6dZmyxI42esJv31x6WXb4BK4Xqn0hqYk3Vsf9UeYZndVAStnxPrzvXObg/exec";
 
 const Backend = {
   usandoServidor(){ return !!API_URL; },
