@@ -103,13 +103,78 @@ function filaOtro(id, tipo, etiqueta){
       <input type="number" id="qty-otro-${id}" min="1" placeholder="Cantidad" style="margin-top:8px;display:none;">
     </div>`;
 }
-function filaCheckbox(valor, inputId, onToggleFn){
+
+/* --- Desplegable de selección múltiple con buscador (para Producto y Modelo) ---
+   En vez de mostrar todos los checkboxes siempre abiertos (muy largo con listas de
+   80+ modelos), queda colapsado como un select normal; al abrirlo aparece un buscador
+   y la lista con checkboxes. Lo que se va marcando aparece como tarjetitas debajo,
+   cada una con su propio campo de cantidad. */
+function normalizarBusqueda(s){
+  return (s||'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+}
+function renderMultiSelect(scopeId, opciones, placeholder){
   return `
-    <label style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);">
-      <input type="checkbox" value="${valor.replace(/"/g,'&quot;')}" onchange="${onToggleFn}">
-      <span style="flex:1;">${valor}</span>
-      <input type="number" min="1" placeholder="0" style="width:90px;display:none;" id="${inputId}">
-    </label>`;
+    <div class="msel" id="msel-${scopeId}">
+      <button type="button" onclick="toggleMultiSelect('${scopeId}')" style="width:100%;text-align:left;font-family:'Inter',sans-serif;font-size:14px;color:var(--ink);padding:11px 12px;background:#FBFAFC;border:1px solid var(--line-strong);border-radius:9px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+        <span id="msel-label-${scopeId}" data-placeholder="${placeholder.replace(/"/g,'&quot;')}">${placeholder}</span>
+        <svg width="12" height="8" viewBox="0 0 12 8" fill="none" style="flex-shrink:0;margin-left:8px;"><path d="M1 1l5 5 5-5" stroke="#6B6470" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+      </button>
+      <div id="msel-panel-${scopeId}" style="display:none;margin-top:8px;border:1px solid var(--line-strong);border-radius:9px;background:#fff;overflow:hidden;box-shadow:var(--shadow);">
+        <input type="text" placeholder="Buscar..." oninput="filtrarMultiSelect('${scopeId}', this.value)" style="width:100%;padding:11px 12px;border:none;border-bottom:1px solid var(--line);font-family:'Inter',sans-serif;font-size:14px;outline:none;box-sizing:border-box;">
+        <div id="msel-opciones-${scopeId}" style="max-height:240px;overflow-y:auto;">
+          ${opciones.map(op => `
+            <label class="msel-opcion" data-texto="${normalizarBusqueda(op).replace(/"/g,'&quot;')}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer;">
+              <input type="checkbox" value="${op.replace(/"/g,'&quot;')}" onchange="onMultiSelectToggle('${scopeId}')">
+              <span style="font-size:14px;">${op}</span>
+            </label>`).join('')}
+        </div>
+        <button type="button" onclick="toggleMultiSelect('${scopeId}', false)" style="width:100%;padding:11px;background:var(--magenta);color:#fff;border:none;font-family:'Sora',sans-serif;font-weight:600;font-size:13px;cursor:pointer;">Listo</button>
+      </div>
+      <div id="msel-chips-${scopeId}" style="margin-top:10px;"></div>
+    </div>`;
+}
+function toggleMultiSelect(scopeId, forzar){
+  const panel = document.getElementById(`msel-panel-${scopeId}`);
+  if(!panel) return;
+  const abierto = panel.style.display !== 'none';
+  panel.style.display = (typeof forzar === 'boolean' ? forzar : !abierto) ? 'block' : 'none';
+}
+function filtrarMultiSelect(scopeId, texto){
+  const q = normalizarBusqueda(texto);
+  document.querySelectorAll(`#msel-opciones-${scopeId} .msel-opcion`).forEach(op => {
+    op.style.display = (op.dataset.texto || '').includes(q) ? 'flex' : 'none';
+  });
+}
+function onMultiSelectToggle(scopeId){
+  renderChipsMultiSelect(scopeId);
+  const n = document.querySelectorAll(`#msel-opciones-${scopeId} input[type=checkbox]:checked`).length;
+  const label = document.getElementById(`msel-label-${scopeId}`);
+  label.textContent = n ? `${n} seleccionado${n>1?'s':''}` : label.dataset.placeholder;
+}
+function quitarSeleccionMultiSelect(scopeId, valor){
+  const chk = document.querySelector(`#msel-opciones-${scopeId} input[type=checkbox][value="${CSS.escape(valor)}"]`);
+  if(chk) chk.checked = false;
+  onMultiSelectToggle(scopeId);
+}
+function renderChipsMultiSelect(scopeId){
+  const marcados = [...document.querySelectorAll(`#msel-opciones-${scopeId} input[type=checkbox]:checked`)];
+  const cont = document.getElementById(`msel-chips-${scopeId}`);
+  // conserva las cantidades ya cargadas si el chip ya existía
+  const cantidadesPrevias = {};
+  cont.querySelectorAll('.msel-chip').forEach(ch => {
+    const inp = ch.querySelector('input[type=number]');
+    if(inp && inp.value) cantidadesPrevias[ch.dataset.valor] = inp.value;
+  });
+  cont.innerHTML = marcados.map(chk => {
+    const val = chk.value;
+    const cantidadPrevia = cantidadesPrevias[val] || '';
+    return `
+      <div class="msel-chip" data-valor="${val.replace(/"/g,'&quot;')}" style="display:flex;align-items:center;gap:8px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;background:#FBFAFC;">
+        <span style="flex:1;font-size:14px;">${val}</span>
+        <input type="number" min="1" placeholder="Cant." value="${cantidadPrevia}" style="width:74px;padding:7px 8px;border:1px solid var(--line-strong);border-radius:8px;font-family:'Inter',sans-serif;font-size:14px;">
+        <button type="button" onclick="quitarSeleccionMultiSelect('${scopeId}','${val.replace(/'/g,"\\'")}')" style="background:none;border:none;color:var(--ink-soft);cursor:pointer;font-size:19px;line-height:1;padding:0 3px;">×</button>
+      </div>`;
+  }).join('');
 }
 
 function onFam(id){
@@ -133,24 +198,15 @@ function onFam(id){
       <div id="detalle-${id}"></div>`;
   } else {
     const productos = PRODUCTOS[fam] || [];
+    const scopeId = `prod-multi-${id}`;
     cuerpo.innerHTML = `
       <div class="field">
         <label class="fld">Productos faltantes <span class="req">*</span></label>
-        <div class="hint" style="margin-bottom:8px;">Marcá todos los que falten. A cada uno le vas a poner su cantidad.</div>
-        <div id="productos-chk-${id}">
-          ${productos.map((p,i)=>filaCheckbox(p, `qtyp-${id}-${i}`, `onProductoMultiToggle(${id})`)).join('')}
-        </div>
+        <div class="hint" style="margin-bottom:8px;">Elegí uno o varios. A cada uno le vas a poner su cantidad.</div>
+        ${renderMultiSelect(scopeId, productos, 'Elegí productos...')}
       </div>
       ${filaOtro(id, 'producto', '¿Falta otro producto que no está en la lista?')}`;
   }
-}
-
-function onProductoMultiToggle(id){
-  const chks = document.querySelectorAll(`#productos-chk-${id} input[type=checkbox]`);
-  chks.forEach((chk, i) => {
-    const qty = document.getElementById(`qtyp-${id}-${i}`);
-    if(qty) qty.style.display = chk.checked ? 'block' : 'none';
-  });
 }
 
 function onProdUnico(id){
@@ -177,13 +233,12 @@ function onProdUnico(id){
 
   const mods = modelosDe(prod);
   if(mods){
+    const scopeId = `mod-multi-${id}`;
     detalle.innerHTML = `
       <div class="field">
         <label class="fld">Modelos faltantes <span class="req">*</span></label>
-        <div class="hint" style="margin-bottom:8px;">Marcá todos los que falten. A cada uno le vas a poner su cantidad.</div>
-        <div id="modelos-chk-${id}">
-          ${mods.map((m,i)=>filaCheckbox(m, `qtym-${id}-${i}`, `onModeloMultiToggle(${id})`)).join('')}
-        </div>
+        <div class="hint" style="margin-bottom:8px;">Elegí uno o varios. A cada uno le vas a poner su cantidad.</div>
+        ${renderMultiSelect(scopeId, mods, 'Elegí modelos...')}
       </div>
       ${filaOtro(id, 'modelo', '¿Falta otro modelo que no está en la lista?')}`;
   } else {
@@ -193,14 +248,6 @@ function onProdUnico(id){
         <input type="number" id="qty-${id}" min="1" placeholder="0">
       </div>`;
   }
-}
-
-function onModeloMultiToggle(id){
-  const chks = document.querySelectorAll(`#modelos-chk-${id} input[type=checkbox]`);
-  chks.forEach((chk, i) => {
-    const qty = document.getElementById(`qtym-${id}-${i}`);
-    if(qty) qty.style.display = chk.checked ? 'block' : 'none';
-  });
 }
 
 function toast(msg){
@@ -343,13 +390,11 @@ async function enviar(){
 
       const mods = modelosDe(prod);
       if(mods){
-        const chks = [...document.querySelectorAll(`#modelos-chk-${id} input[type=checkbox]`)];
-        const marcados = chks.filter(c => c.checked);
-        marcados.forEach((chk, idxMarcado) => {
-          const idx = chks.indexOf(chk);
-          const qty = document.getElementById(`qtym-${id}-${idx}`)?.value;
+        const chips = [...document.querySelectorAll(`#msel-chips-mod-multi-${id} .msel-chip`)];
+        chips.forEach(chip => {
+          const qty = chip.querySelector('input[type=number]')?.value;
           if(!qty){ ok=false; return; }
-          registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: chk.value, cantidad: parseInt(qty) });
+          registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: chip.dataset.valor, cantidad: parseInt(qty) });
           algoMarcado = true;
         });
         const detalle = (document.getElementById(`modc-${id}`)?.value || '').trim();
@@ -365,7 +410,7 @@ async function enviar(){
           }
           algoMarcado = true;
         }
-        if(!marcados.length && !detalle){ ok=false; return; }
+        if(!chips.length && !detalle){ ok=false; return; }
       } else {
         const qty = document.getElementById(`qty-${id}`)?.value;
         if(!qty){ ok=false; return; }
@@ -373,13 +418,11 @@ async function enviar(){
         algoMarcado = true;
       }
     } else {
-      const chks = [...document.querySelectorAll(`#productos-chk-${id} input[type=checkbox]`)];
-      const marcados = chks.filter(c => c.checked);
-      marcados.forEach(chk => {
-        const idx = chks.indexOf(chk);
-        const qty = document.getElementById(`qtyp-${id}-${idx}`)?.value;
+      const chips = [...document.querySelectorAll(`#msel-chips-prod-multi-${id} .msel-chip`)];
+      chips.forEach(chip => {
+        const qty = chip.querySelector('input[type=number]')?.value;
         if(!qty){ ok=false; return; }
-        registros.push({ fecha, tienda, familia: fam, producto: chk.value, modelo: '', cantidad: parseInt(qty) });
+        registros.push({ fecha, tienda, familia: fam, producto: chip.dataset.valor, modelo: '', cantidad: parseInt(qty) });
         algoMarcado = true;
       });
       const detalle = (document.getElementById(`modc-${id}`)?.value || '').trim();
@@ -392,7 +435,7 @@ async function enviar(){
         if(!PRODUCTOS[fam].includes(detalle)) PRODUCTOS[fam].push(detalle);
         algoMarcado = true;
       }
-      if(!marcados.length && !detalle){ ok=false; return; }
+      if(!chips.length && !detalle){ ok=false; return; }
     }
   });
   if(!ok){ toast('Revisá los faltantes: falta completar una cantidad, o el detalle si escribiste "otro".'); return; }
@@ -471,3 +514,4 @@ async function iniciarCarga() {
 var _hoy = new Date();
 document.getElementById('fecha').value = _hoy.getFullYear() + '-' + String(_hoy.getMonth()+1).padStart(2,'0') + '-' + String(_hoy.getDate()).padStart(2,'0');
 iniciarCarga();
+
