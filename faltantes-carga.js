@@ -90,18 +90,43 @@ function addItem() {
 function rmItem(id){ const e=document.getElementById(`it-${id}`); if(e) e.remove(); }
 
 /* Fila reutilizable para el campo opcional "¿falta otro X que no está en la lista?" */
-function filaOtro(id, tipo, etiqueta){
+/* Calcula el límite de caracteres para el campo "otro", usando como referencia
+   el nombre más largo que ya existe activo en esa misma categoría (familia o marca). */
+function maxLongitud(lista, minimo){
+  minimo = minimo || 10;
+  if(!lista || !lista.length) return minimo;
+  return Math.max(...lista.map(s => (s||'').length), minimo);
+}
+function filaOtro(id, tipo, etiqueta, maxLen){
   return `
     <div class="field" style="margin-top:14px;">
-      <label class="fld">${etiqueta}</label>
-      <input type="text" id="modc-${id}" placeholder="Escribí acá (opcional)..."
-        oninput="onDetalleInput(${id}, '${tipo}'); document.getElementById('qty-otro-${id}').style.display = this.value.trim() ? 'block' : 'none';">
-      <div id="modc-sug-${id}" style="display:none;margin-top:8px;">
-        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:5px;">¿Alguno de estos?</div>
-        <div id="modc-sug-chips-${id}" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:14px;">
+        <input type="checkbox" id="chk-otro-${id}" onchange="onToggleOtro(${id})">
+        <span>${etiqueta}</span>
+      </label>
+      <div id="otro-campos-${id}" style="display:none;margin-top:10px;">
+        <input type="text" id="modc-${id}" maxlength="${maxLen}" placeholder="Escribí acá..."
+          oninput="onDetalleInput(${id}, '${tipo}')">
+        <div id="modc-sug-${id}" style="display:none;margin-top:8px;">
+          <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:5px;">¿Alguno de estos?</div>
+          <div id="modc-sug-chips-${id}" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        </div>
+        <input type="number" id="qty-otro-${id}" min="1" placeholder="Cantidad" style="margin-top:8px;">
       </div>
-      <input type="number" id="qty-otro-${id}" min="1" placeholder="Cantidad" style="margin-top:8px;display:none;">
     </div>`;
+}
+function onToggleOtro(id){
+  const chk = document.getElementById(`chk-otro-${id}`);
+  const campos = document.getElementById(`otro-campos-${id}`);
+  if(!chk || !campos) return;
+  campos.style.display = chk.checked ? 'block' : 'none';
+  if(chk.checked){
+    document.getElementById(`modc-${id}`)?.focus();
+  } else {
+    const modc = document.getElementById(`modc-${id}`); if(modc) modc.value = '';
+    const qty = document.getElementById(`qty-otro-${id}`); if(qty) qty.value = '';
+    resetSugerencia(id);
+  }
 }
 
 /* --- Desplegable de selección múltiple con buscador (para Producto y Modelo) ---
@@ -205,20 +230,22 @@ function onFam(id){
         <div class="hint" style="margin-bottom:8px;">Elegí uno o varios. A cada uno le vas a poner su cantidad.</div>
         ${renderMultiSelect(scopeId, productos, 'Elegí productos...')}
       </div>
-      ${filaOtro(id, 'producto', '¿Falta otro producto que no está en la lista?')}`;
+      ${filaOtro(id, 'producto', 'El producto no está en la lista', maxLongitud(productos))}`;
   }
 }
 
 function onProdUnico(id){
   const prod = document.getElementById(`prod-${id}`).value;
+  const fam = document.getElementById(`fam-${id}`).value;
   const detalle = document.getElementById(`detalle-${id}`);
   if(!prod){ detalle.innerHTML=''; return; }
 
   if(prod === 'OTROS'){
+    const maxLen = maxLongitud(PRODUCTOS[fam]);
     detalle.innerHTML = `
       <div class="field">
         <label class="fld">Ingrese otro producto <span class="req">*</span></label>
-        <input type="text" id="modc-${id}" placeholder="Escribí qué producto es..." oninput="onDetalleInput(${id}, 'producto')">
+        <input type="text" id="modc-${id}" maxlength="${maxLen}" placeholder="Escribí qué producto es..." oninput="onDetalleInput(${id}, 'producto')">
         <div id="modc-sug-${id}" style="display:none;margin-top:8px;">
           <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:5px;">¿Alguno de estos?</div>
           <div id="modc-sug-chips-${id}" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
@@ -240,7 +267,7 @@ function onProdUnico(id){
         <div class="hint" style="margin-bottom:8px;">Elegí uno o varios. A cada uno le vas a poner su cantidad.</div>
         ${renderMultiSelect(scopeId, mods, 'Elegí modelos...')}
       </div>
-      ${filaOtro(id, 'modelo', '¿Falta otro modelo que no está en la lista?')}`;
+      ${filaOtro(id, 'modelo', 'El modelo no está en la lista', maxLongitud(mods))}`;
   } else {
     detalle.innerHTML = `
       <div class="field">
@@ -397,7 +424,9 @@ async function enviar(){
           registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: chip.dataset.valor, cantidad: parseInt(qty) });
           algoMarcado = true;
         });
+        const chkOtroModelo = document.getElementById(`chk-otro-${id}`)?.checked;
         const detalle = (document.getElementById(`modc-${id}`)?.value || '').trim();
+        if(chkOtroModelo && !detalle){ ok=false; return; }
         if(detalle){
           const qty = document.getElementById(`qty-otro-${id}`)?.value;
           if(!qty){ ok=false; return; }
@@ -425,7 +454,9 @@ async function enviar(){
         registros.push({ fecha, tienda, familia: fam, producto: chip.dataset.valor, modelo: '', cantidad: parseInt(qty) });
         algoMarcado = true;
       });
+      const chkOtroProducto = document.getElementById(`chk-otro-${id}`)?.checked;
       const detalle = (document.getElementById(`modc-${id}`)?.value || '').trim();
+      if(chkOtroProducto && !detalle){ ok=false; return; }
       if(detalle){
         const qty = document.getElementById(`qty-otro-${id}`)?.value;
         if(!qty){ ok=false; return; }
@@ -514,4 +545,3 @@ async function iniciarCarga() {
 var _hoy = new Date();
 document.getElementById('fecha').value = _hoy.getFullYear() + '-' + String(_hoy.getMonth()+1).padStart(2,'0') + '-' + String(_hoy.getDate()).padStart(2,'0');
 iniciarCarga();
-
