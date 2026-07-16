@@ -97,35 +97,51 @@ function maxLongitud(lista, minimo){
   if(!lista || !lista.length) return minimo;
   return Math.max(...lista.map(s => (s||'').length), minimo);
 }
-function filaOtro(id, tipo, etiqueta, maxLen){
+let otrosContador = {}; // { itemId: próximo índice de fila }
+
+function filaOtro(id, tipo, etiquetaBoton, maxLen){
+  otrosContador[id] = 0;
   return `
     <div class="field" style="margin-top:14px;">
-      <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:14px;">
-        <input type="checkbox" id="chk-otro-${id}" onchange="onToggleOtro(${id})">
-        <span>${etiqueta}</span>
-      </label>
-      <div id="otro-campos-${id}" style="display:none;margin-top:10px;">
-        <input type="text" id="modc-${id}" maxlength="${maxLen}" placeholder="Escribí acá..."
-          oninput="onDetalleInput(${id}, '${tipo}')">
-        <div id="modc-sug-${id}" style="display:none;margin-top:8px;">
-          <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:5px;">¿Alguno de estos?</div>
-          <div id="modc-sug-chips-${id}" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
-        </div>
-        <input type="number" id="qty-otro-${id}" min="1" placeholder="Cantidad" style="margin-top:8px;">
-      </div>
+      <div id="otros-lista-${id}"></div>
+      <button type="button" onclick="agregarFilaOtro(${id}, '${tipo}', ${maxLen})" id="btn-otro-${id}"
+        data-etiqueta="${etiquetaBoton.replace(/"/g,'&quot;')}"
+        style="font-size:13.5px;color:var(--magenta);background:none;border:none;cursor:pointer;font-weight:600;padding:6px 0;">
+        + ${etiquetaBoton}
+      </button>
     </div>`;
 }
-function onToggleOtro(id){
-  const chk = document.getElementById(`chk-otro-${id}`);
-  const campos = document.getElementById(`otro-campos-${id}`);
-  if(!chk || !campos) return;
-  campos.style.display = chk.checked ? 'block' : 'none';
-  if(chk.checked){
-    document.getElementById(`modc-${id}`)?.focus();
-  } else {
-    const modc = document.getElementById(`modc-${id}`); if(modc) modc.value = '';
-    const qty = document.getElementById(`qty-otro-${id}`); if(qty) qty.value = '';
-    resetSugerencia(id);
+
+function agregarFilaOtro(id, tipo, maxLen){
+  const idx = otrosContador[id]++;
+  const rowId = `${id}-${idx}`;
+  const lista = document.getElementById(`otros-lista-${id}`);
+  const row = document.createElement('div');
+  row.className = 'otro-row';
+  row.id = `otro-row-${rowId}`;
+  row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;';
+  row.innerHTML = `
+    <div style="flex:1;">
+      <input type="text" id="modc-${rowId}" maxlength="${maxLen}" placeholder="Escribí acá..." oninput="onDetalleInput('${rowId}', '${tipo}')">
+      <div id="modc-sug-${rowId}" style="display:none;margin-top:8px;">
+        <div id="modc-sug-titulo-${rowId}" style="font-size:11.5px;color:var(--ink-soft);margin-bottom:5px;">¿Alguno de estos?</div>
+        <div id="modc-sug-chips-${rowId}" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      </div>
+    </div>
+    <input type="number" id="qty-otro-${rowId}" min="1" placeholder="Cant." style="width:80px;flex-shrink:0;">
+    <button type="button" onclick="quitarFilaOtro(${id}, '${rowId}')" title="Quitar" style="background:none;border:none;color:var(--ink-soft);cursor:pointer;font-size:20px;line-height:1;padding:8px 4px;flex-shrink:0;">×</button>`;
+  lista.appendChild(row);
+  document.getElementById(`modc-${rowId}`).focus();
+  document.getElementById(`btn-otro-${id}`).textContent = '+ Agregar otro';
+}
+
+function quitarFilaOtro(id, rowId){
+  const row = document.getElementById(`otro-row-${rowId}`);
+  if(row) row.remove();
+  const lista = document.getElementById(`otros-lista-${id}`);
+  const btn = document.getElementById(`btn-otro-${id}`);
+  if(lista && btn && !lista.children.length){
+    btn.textContent = '+ ' + btn.dataset.etiqueta;
   }
 }
 
@@ -230,7 +246,7 @@ function onFam(id){
         <div class="hint" style="margin-bottom:8px;">Elegí uno o varios. A cada uno le vas a poner su cantidad.</div>
         ${renderMultiSelect(scopeId, productos, 'Elegí productos...')}
       </div>
-      ${filaOtro(id, 'producto', 'El producto no está en la lista', maxLongitud(productos))}`;
+      ${filaOtro(id, 'producto', 'Agregar producto que no está en la lista', maxLongitud(productos))}`;
   }
 }
 
@@ -247,7 +263,7 @@ function onProdUnico(id){
         <label class="fld">Ingrese otro producto <span class="req">*</span></label>
         <input type="text" id="modc-${id}" maxlength="${maxLen}" placeholder="Escribí qué producto es..." oninput="onDetalleInput(${id}, 'producto')">
         <div id="modc-sug-${id}" style="display:none;margin-top:8px;">
-          <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:5px;">¿Alguno de estos?</div>
+          <div id="modc-sug-titulo-${id}" style="font-size:11.5px;color:var(--ink-soft);margin-bottom:5px;">¿Alguno de estos?</div>
           <div id="modc-sug-chips-${id}" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
         </div>
       </div>
@@ -267,7 +283,7 @@ function onProdUnico(id){
         <div class="hint" style="margin-bottom:8px;">Elegí uno o varios. A cada uno le vas a poner su cantidad.</div>
         ${renderMultiSelect(scopeId, mods, 'Elegí modelos...')}
       </div>
-      ${filaOtro(id, 'modelo', 'El modelo no está en la lista', maxLongitud(mods))}`;
+      ${filaOtro(id, 'modelo', 'Agregar modelo que no está en la lista', maxLongitud(mods))}`;
   } else {
     detalle.innerHTML = `
       <div class="field">
@@ -347,33 +363,49 @@ function onDetalleInput(id, tipo){
   clearTimeout(_detalleTimers[id]);
   _detalleTimers[id] = setTimeout(()=>evaluarSugerencia(id, tipo), 300);
 }
+function normalizarExacta(s){
+  return normalizarBusqueda(s).replace(/\s+/g, ' ').trim();
+}
 function evaluarSugerencia(id, tipo){
   const campo = document.getElementById(`modc-${id}`);
   const sugBox = document.getElementById(`modc-sug-${id}`);
   const chips = document.getElementById(`modc-sug-chips-${id}`);
+  const titulo = document.getElementById(`modc-sug-titulo-${id}`);
   if(!campo || !sugBox || !chips) return;
   const val = campo.value.trim();
   if(val.length < 2){ resetSugerencia(id); return; }
 
-  const fam = document.getElementById(`fam-${id}`)?.value;
+  // El id puede venir como "5" (campo único) o "5-2" (fila dinámica de "otro");
+  // en ambos casos el ítem base (para leer familia/producto elegidos) es la primera parte.
+  const baseId = String(id).split('-')[0];
+  const fam = document.getElementById(`fam-${baseId}`)?.value;
   let candidatos = [];
   if(tipo === 'producto'){
     candidatos = PRODUCTOS[fam] || [];
   } else {
-    const prod = document.getElementById(`prod-${id}`)?.value;
+    const prod = document.getElementById(`prod-${baseId}`)?.value;
     const gm = PRODUCTO_GRUPO[prod];
     candidatos = gm ? (MODELOS_POR_GRUPO[gm]||[]) : [];
   }
 
-  const sugeridos = mejoresCoincidencias(val, candidatos, 3, 0.45);
+  // Si lo que escribieron ya existe tal cual en la lista (ignorando mayúsculas/tildes/espacios),
+  // lo mostramos primero y con un título más directo, para evitar cargarlo de nuevo como "nuevo".
+  const valNorm = normalizarExacta(val);
+  const exacto = candidatos.find(c => normalizarExacta(c) === valNorm);
+
+  let sugeridos = mejoresCoincidencias(val, candidatos, 3, 0.45);
+  if(exacto){
+    sugeridos = [exacto, ...sugeridos.filter(s => s !== exacto)].slice(0, 3);
+  }
+
   if(sugeridos.length){
+    titulo.textContent = exacto ? 'Ya está en la lista:' : '¿Alguno de estos?';
     chips.innerHTML = sugeridos.map(s =>
-      `<button type="button" onclick="usarSugerencia(${id},'${s.replace(/'/g,"\\'")}')" style="font-size:12.5px;padding:5px 10px;border-radius:20px;border:1px solid var(--line-strong);background:#fff;color:var(--ink);cursor:pointer;">${s}</button>`
+      `<button type="button" onclick="usarSugerencia('${id}','${s.replace(/'/g,"\\'")}')" style="font-size:12.5px;padding:5px 10px;border-radius:20px;border:1px solid var(--line-strong);background:#fff;color:var(--ink);cursor:pointer;">${s}</button>`
     ).join('');
     sugBox.style.display = 'block';
   } else {
     resetSugerencia(id);
-
   }
 }
 function usarSugerencia(id, valor){
@@ -424,12 +456,12 @@ async function enviar(){
           registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: chip.dataset.valor, cantidad: parseInt(qty) });
           algoMarcado = true;
         });
-        const chkOtroModelo = document.getElementById(`chk-otro-${id}`)?.checked;
-        const detalle = (document.getElementById(`modc-${id}`)?.value || '').trim();
-        if(chkOtroModelo && !detalle){ ok=false; return; }
-        if(detalle){
-          const qty = document.getElementById(`qty-otro-${id}`)?.value;
-          if(!qty){ ok=false; return; }
+        const filasOtroModelo = [...document.querySelectorAll(`#otros-lista-${id} .otro-row`)];
+        filasOtroModelo.forEach(row => {
+          const detalle = (row.querySelector('input[type=text]')?.value || '').trim();
+          const qty = row.querySelector('input[type=number]')?.value;
+          if(!detalle && !qty) return; // fila vacía sin tocar, se ignora
+          if(!detalle || !qty){ ok=false; return; }
           registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: detalle, cantidad: parseInt(qty) });
           const gm = PRODUCTO_GRUPO[prod];
           if(gm){
@@ -438,8 +470,8 @@ async function enviar(){
             if(!MODELOS_POR_GRUPO[gm].includes(detalle)) MODELOS_POR_GRUPO[gm].push(detalle);
           }
           algoMarcado = true;
-        }
-        if(!chips.length && !detalle){ ok=false; return; }
+        });
+        if(!chips.length && !filasOtroModelo.length){ ok=false; return; }
       } else {
         const qty = document.getElementById(`qty-${id}`)?.value;
         if(!qty){ ok=false; return; }
@@ -454,19 +486,19 @@ async function enviar(){
         registros.push({ fecha, tienda, familia: fam, producto: chip.dataset.valor, modelo: '', cantidad: parseInt(qty) });
         algoMarcado = true;
       });
-      const chkOtroProducto = document.getElementById(`chk-otro-${id}`)?.checked;
-      const detalle = (document.getElementById(`modc-${id}`)?.value || '').trim();
-      if(chkOtroProducto && !detalle){ ok=false; return; }
-      if(detalle){
-        const qty = document.getElementById(`qty-otro-${id}`)?.value;
-        if(!qty){ ok=false; return; }
+      const filasOtroProducto = [...document.querySelectorAll(`#otros-lista-${id} .otro-row`)];
+      filasOtroProducto.forEach(row => {
+        const detalle = (row.querySelector('input[type=text]')?.value || '').trim();
+        const qty = row.querySelector('input[type=number]')?.value;
+        if(!detalle && !qty) return; // fila vacía sin tocar, se ignora
+        if(!detalle || !qty){ ok=false; return; }
         registros.push({ fecha, tienda, familia: fam, producto: detalle, modelo: '', cantidad: parseInt(qty) });
         nuevosProductos.push({ familia: fam, producto: detalle });
         if(!PRODUCTOS[fam]) PRODUCTOS[fam] = [];
         if(!PRODUCTOS[fam].includes(detalle)) PRODUCTOS[fam].push(detalle);
         algoMarcado = true;
-      }
-      if(!chips.length && !detalle){ ok=false; return; }
+      });
+      if(!chips.length && !filasOtroProducto.length){ ok=false; return; }
     }
   });
   if(!ok){ toast('Revisá los faltantes: falta completar una cantidad, o el detalle si escribiste "otro".'); return; }
