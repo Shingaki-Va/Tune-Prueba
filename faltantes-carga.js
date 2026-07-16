@@ -83,31 +83,134 @@ function addItem() {
         ${Object.keys(PRODUCTOS).map(f=>`<option value="${f}">${f}</option>`).join('')}
       </select>
     </div>
-    <div class="field">
-      <label class="fld">Producto <span class="req">*</span></label>
-      <select id="prod-${id}" disabled onchange="onProd(${id})"><option value="">Elegí familia primero...</option></select>
-    </div>
-    <div class="field" id="modf-${id}" style="display:none;">
-      <label class="fld">Modelo</label>
-      <select id="mod-${id}" onchange="onModeloChange(${id})"><option value="">Elegí modelo...</option></select>
-    </div>
-    <div class="field" id="modcf-${id}" style="display:none;">
-      <label class="fld" id="modc-label-${id}">Otros</label>
-      <input type="text" id="modc-${id}" placeholder="Escribí el modelo..." oninput="onDetalleInput(${id})">
-      <div class="hint" id="modc-hint-${id}">Aclaración o modelo específico, si corresponde.</div>
-      <div id="modc-sug-${id}" style="display:none;margin-top:8px;">
-        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:5px;">¿Alguno de estos?</div>
-        <div id="modc-sug-chips-${id}" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
-      </div>
-    </div>
-    <div class="field">
-      <label class="fld">Cantidad estimada perdida <span class="req">*</span></label>
-      <input type="number" id="qty-${id}" min="1" placeholder="0">
-    </div>`;
+    <div id="cuerpo-${id}"></div>`;
   document.getElementById('items').appendChild(div);
   document.getElementById(`fam-${id}`).focus();
 }
 function rmItem(id){ const e=document.getElementById(`it-${id}`); if(e) e.remove(); }
+
+/* Fila reutilizable para el campo opcional "¿falta otro X que no está en la lista?" */
+function filaOtro(id, tipo, etiqueta){
+  return `
+    <div class="field" style="margin-top:14px;">
+      <label class="fld">${etiqueta}</label>
+      <input type="text" id="modc-${id}" placeholder="Escribí acá (opcional)..."
+        oninput="onDetalleInput(${id}, '${tipo}'); document.getElementById('qty-otro-${id}').style.display = this.value.trim() ? 'block' : 'none';">
+      <div id="modc-sug-${id}" style="display:none;margin-top:8px;">
+        <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:5px;">¿Alguno de estos?</div>
+        <div id="modc-sug-chips-${id}" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      </div>
+      <input type="number" id="qty-otro-${id}" min="1" placeholder="Cantidad" style="margin-top:8px;display:none;">
+    </div>`;
+}
+function filaCheckbox(valor, inputId, onToggleFn){
+  return `
+    <label style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);">
+      <input type="checkbox" value="${valor.replace(/"/g,'&quot;')}" onchange="${onToggleFn}">
+      <span style="flex:1;">${valor}</span>
+      <input type="number" min="1" placeholder="0" style="width:90px;display:none;" id="${inputId}">
+    </label>`;
+}
+
+function onFam(id){
+  const fam = document.getElementById(`fam-${id}`).value;
+  const bdg = document.getElementById(`bdg-${id}`);
+  const cuerpo = document.getElementById(`cuerpo-${id}`);
+  if(!fam){ bdg.style.display='none'; cuerpo.innerHTML=''; return; }
+  bdg.textContent = fam; bdg.style.display='inline-block';
+  bdg.style.background = FAM_COLOR[fam]||'#eee'; bdg.style.color='#3a3340';
+
+  if(fam === 'Seguridad' || fam === 'Vidrios'){
+    cuerpo.innerHTML = `
+      <div class="field">
+        <label class="fld">Producto <span class="req">*</span></label>
+        <select id="prod-${id}" onchange="onProdUnico(${id})">
+          <option value="">Elegí producto...</option>
+          ${PRODUCTOS[fam].map(p=>`<option value="${p.replace(/"/g,'&quot;')}">${p}</option>`).join('')}
+          <option value="OTROS">OTROS (no está en la lista)</option>
+        </select>
+      </div>
+      <div id="detalle-${id}"></div>`;
+  } else {
+    const productos = PRODUCTOS[fam] || [];
+    cuerpo.innerHTML = `
+      <div class="field">
+        <label class="fld">Productos faltantes <span class="req">*</span></label>
+        <div class="hint" style="margin-bottom:8px;">Marcá todos los que falten. A cada uno le vas a poner su cantidad.</div>
+        <div id="productos-chk-${id}">
+          ${productos.map((p,i)=>filaCheckbox(p, `qtyp-${id}-${i}`, `onProductoMultiToggle(${id})`)).join('')}
+        </div>
+      </div>
+      ${filaOtro(id, 'producto', '¿Falta otro producto que no está en la lista?')}`;
+  }
+}
+
+function onProductoMultiToggle(id){
+  const chks = document.querySelectorAll(`#productos-chk-${id} input[type=checkbox]`);
+  chks.forEach((chk, i) => {
+    const qty = document.getElementById(`qtyp-${id}-${i}`);
+    if(qty) qty.style.display = chk.checked ? 'block' : 'none';
+  });
+}
+
+function onProdUnico(id){
+  const prod = document.getElementById(`prod-${id}`).value;
+  const detalle = document.getElementById(`detalle-${id}`);
+  if(!prod){ detalle.innerHTML=''; return; }
+
+  if(prod === 'OTROS'){
+    detalle.innerHTML = `
+      <div class="field">
+        <label class="fld">Ingrese otro producto <span class="req">*</span></label>
+        <input type="text" id="modc-${id}" placeholder="Escribí qué producto es..." oninput="onDetalleInput(${id}, 'producto')">
+        <div id="modc-sug-${id}" style="display:none;margin-top:8px;">
+          <div style="font-size:11.5px;color:var(--ink-soft);margin-bottom:5px;">¿Alguno de estos?</div>
+          <div id="modc-sug-chips-${id}" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        </div>
+      </div>
+      <div class="field">
+        <label class="fld">Cantidad estimada perdida <span class="req">*</span></label>
+        <input type="number" id="qty-${id}" min="1" placeholder="0">
+      </div>`;
+    return;
+  }
+
+  const mods = modelosDe(prod);
+  if(mods){
+    detalle.innerHTML = `
+      <div class="field">
+        <label class="fld">Modelos faltantes <span class="req">*</span></label>
+        <div class="hint" style="margin-bottom:8px;">Marcá todos los que falten. A cada uno le vas a poner su cantidad.</div>
+        <div id="modelos-chk-${id}">
+          ${mods.map((m,i)=>filaCheckbox(m, `qtym-${id}-${i}`, `onModeloMultiToggle(${id})`)).join('')}
+        </div>
+      </div>
+      ${filaOtro(id, 'modelo', '¿Falta otro modelo que no está en la lista?')}`;
+  } else {
+    detalle.innerHTML = `
+      <div class="field">
+        <label class="fld">Cantidad estimada perdida <span class="req">*</span></label>
+        <input type="number" id="qty-${id}" min="1" placeholder="0">
+      </div>`;
+  }
+}
+
+function onModeloMultiToggle(id){
+  const chks = document.querySelectorAll(`#modelos-chk-${id} input[type=checkbox]`);
+  chks.forEach((chk, i) => {
+    const qty = document.getElementById(`qtym-${id}-${i}`);
+    if(qty) qty.style.display = chk.checked ? 'block' : 'none';
+  });
+}
+
+function toast(msg){
+  const t=document.getElementById('toast');
+  document.getElementById('toast-msg').textContent=msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2600);
+}
+
+
 
 /* --- Coincidencia difusa para sugerir el modelo/producto correcto al escribir en "Otros" ---
    Es heurística y local (sin IA ni servicios externos): tolera errores de tipeo y abreviaturas
@@ -166,11 +269,11 @@ function resetSugerencia(id){
   if(chips) chips.innerHTML='';
 }
 let _detalleTimers = {};
-function onDetalleInput(id){
+function onDetalleInput(id, tipo){
   clearTimeout(_detalleTimers[id]);
-  _detalleTimers[id] = setTimeout(()=>evaluarSugerencia(id), 300);
+  _detalleTimers[id] = setTimeout(()=>evaluarSugerencia(id, tipo), 300);
 }
-function evaluarSugerencia(id){
+function evaluarSugerencia(id, tipo){
   const campo = document.getElementById(`modc-${id}`);
   const sugBox = document.getElementById(`modc-sug-${id}`);
   const chips = document.getElementById(`modc-sug-chips-${id}`);
@@ -178,12 +281,12 @@ function evaluarSugerencia(id){
   const val = campo.value.trim();
   if(val.length < 2){ resetSugerencia(id); return; }
 
-  const prod = document.getElementById(`prod-${id}`)?.value;
   const fam = document.getElementById(`fam-${id}`)?.value;
   let candidatos = [];
-  if(prod === 'OTROS'){
+  if(tipo === 'producto'){
     candidatos = PRODUCTOS[fam] || [];
   } else {
+    const prod = document.getElementById(`prod-${id}`)?.value;
     const gm = PRODUCTO_GRUPO[prod];
     candidatos = gm ? (MODELOS_POR_GRUPO[gm]||[]) : [];
   }
@@ -196,81 +299,12 @@ function evaluarSugerencia(id){
     sugBox.style.display = 'block';
   } else {
     resetSugerencia(id);
+
   }
 }
 function usarSugerencia(id, valor){
   document.getElementById(`modc-${id}`).value = valor;
   resetSugerencia(id);
-}
-
-function onFam(id){
-  const fam = document.getElementById(`fam-${id}`).value;
-  const ps = document.getElementById(`prod-${id}`);
-  const bdg = document.getElementById(`bdg-${id}`);
-  const mcf = document.getElementById(`modcf-${id}`);
-  document.getElementById(`modf-${id}`).style.display='none';
-  if(!fam){ ps.innerHTML='<option value="">Elegí familia primero...</option>'; ps.disabled=true; bdg.style.display='none'; mcf.style.display='none'; return; }
-  bdg.textContent = fam; bdg.style.display='inline-block';
-  bdg.style.background = FAM_COLOR[fam]||'#eee'; bdg.style.color='#3a3340';
-  ps.disabled=false;
-  ps.innerHTML = '<option value="">Elegí producto...</option>'
-    + PRODUCTOS[fam].map(p=>`<option value="${p.replace(/"/g,'&quot;')}">${p}</option>`).join('')
-    + '<option value="OTROS">OTROS (no está en la lista)</option>';
-  mcf.style.display='none';
-  document.getElementById(`modc-${id}`).value = ''; resetSugerencia(id);
-}
-function onProd(id){
-  const prod = document.getElementById(`prod-${id}`).value;
-  const fam = document.getElementById(`fam-${id}`).value;
-  const mf = document.getElementById(`modf-${id}`), mcf = document.getElementById(`modcf-${id}`), ms = document.getElementById(`mod-${id}`);
-  const lbl = document.getElementById(`modc-label-${id}`), hint = document.getElementById(`modc-hint-${id}`);
-
-  if(prod === 'OTROS'){
-    // Producto no está en la lista: se oculta el modelo y se pide el detalle del producto.
-    mf.style.display='none';
-    ms.value='';
-    mcf.style.display='block';
-    lbl.textContent = 'Ingrese otro producto';
-    hint.textContent = 'Escribí qué producto es.';
-    document.getElementById(`modc-${id}`).focus();
-    return;
-  }
-
-  const mods = modelosDe(prod);
-  if(mods){
-    mf.style.display='block';
-    ms.innerHTML = '<option value="">Elegí modelo...</option>'
-      + mods.map(m=>`<option value="${m}">${m}</option>`).join('')
-      + '<option value="OTROS">OTROS (no está en la lista)</option>';
-    mcf.style.display='none';
-    document.getElementById(`modc-${id}`).value = ''; resetSugerencia(id);
-  } else {
-    mf.style.display='none';
-    mcf.style.display='none';
-    document.getElementById(`modc-${id}`).value = ''; resetSugerencia(id);
-  }
-}
-function onModeloChange(id){
-  const ms = document.getElementById(`mod-${id}`);
-  const mcf = document.getElementById(`modcf-${id}`);
-  const lbl = document.getElementById(`modc-label-${id}`), hint = document.getElementById(`modc-hint-${id}`);
-  if(!ms) return;
-  if(ms.value === 'OTROS'){
-    mcf.style.display='block';
-    lbl.textContent = 'Ingrese otro modelo';
-    hint.textContent = 'Escribí el modelo exacto.';
-    document.getElementById(`modc-${id}`).focus();
-  } else {
-    mcf.style.display='none';
-    document.getElementById(`modc-${id}`).value = ''; resetSugerencia(id);
-  }
-}
-
-function toast(msg){
-  const t=document.getElementById('toast');
-  document.getElementById('toast-msg').textContent=msg;
-  t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'), 2600);
 }
 
 async function enviar(){
@@ -282,44 +316,87 @@ async function enviar(){
   const items = document.querySelectorAll('.item');
   if(!items.length){ toast('Agregá al menos un faltante.'); return; }
 
-  const registros = []; let ok = true;
-  const nuevosProductos = []; // { familia, producto } escritos en "OTROS" (producto)
-  const nuevosModelos = [];   // { grupoModelo, modelo } escritos en "OTROS" (modelo)
+  const registros = []; let ok = true; let algoMarcado = false;
+  const nuevosProductos = []; // { familia, producto } escritos como "otro" (producto)
+  const nuevosModelos = [];   // { grupoModelo, modelo } escritos como "otro" (modelo)
+
   items.forEach(it=>{
     const id = it.id.replace('it-','');
     const fam = document.getElementById(`fam-${id}`)?.value;
-    const prodSel = document.getElementById(`prod-${id}`)?.value;
-    const qty = document.getElementById(`qty-${id}`)?.value;
-    const modSel = document.getElementById(`mod-${id}`)?.value || '';
-    const detalle = (document.getElementById(`modc-${id}`)?.value || '').trim();
+    if(!fam){ ok=false; return; }
 
-    if(!fam || !prodSel || !qty){ ok=false; return; }
+    if(fam === 'Seguridad' || fam === 'Vidrios'){
+      const prod = document.getElementById(`prod-${id}`)?.value;
+      if(!prod){ ok=false; return; }
 
-    let producto = prodSel;
-    let modelo = '';
+      if(prod === 'OTROS'){
+        const detalle = (document.getElementById(`modc-${id}`)?.value || '').trim();
+        const qty = document.getElementById(`qty-${id}`)?.value;
+        if(!detalle || !qty){ ok=false; return; }
+        registros.push({ fecha, tienda, familia: fam, producto: detalle, modelo: '', cantidad: parseInt(qty) });
+        nuevosProductos.push({ familia: fam, producto: detalle });
+        if(!PRODUCTOS[fam]) PRODUCTOS[fam] = [];
+        if(!PRODUCTOS[fam].includes(detalle)) PRODUCTOS[fam].push(detalle);
+        algoMarcado = true;
+        return;
+      }
 
-    if(prodSel === 'OTROS'){
-      if(!detalle){ ok=false; return; }
-      producto = detalle;
-      nuevosProductos.push({ familia: fam, producto: detalle });
-      if(!PRODUCTOS[fam]) PRODUCTOS[fam] = [];
-      if(!PRODUCTOS[fam].includes(detalle)) PRODUCTOS[fam].push(detalle);
-    } else if(modSel === 'OTROS'){
-      if(!detalle){ ok=false; return; }
-      modelo = detalle;
-      const gm = PRODUCTO_GRUPO[prodSel];
-      if(gm){
-        nuevosModelos.push({ grupoModelo: gm, modelo: detalle });
-        if(!MODELOS_POR_GRUPO[gm]) MODELOS_POR_GRUPO[gm] = [];
-        if(!MODELOS_POR_GRUPO[gm].includes(detalle)) MODELOS_POR_GRUPO[gm].push(detalle);
+      const mods = modelosDe(prod);
+      if(mods){
+        const chks = [...document.querySelectorAll(`#modelos-chk-${id} input[type=checkbox]`)];
+        const marcados = chks.filter(c => c.checked);
+        marcados.forEach((chk, idxMarcado) => {
+          const idx = chks.indexOf(chk);
+          const qty = document.getElementById(`qtym-${id}-${idx}`)?.value;
+          if(!qty){ ok=false; return; }
+          registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: chk.value, cantidad: parseInt(qty) });
+          algoMarcado = true;
+        });
+        const detalle = (document.getElementById(`modc-${id}`)?.value || '').trim();
+        if(detalle){
+          const qty = document.getElementById(`qty-otro-${id}`)?.value;
+          if(!qty){ ok=false; return; }
+          registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: detalle, cantidad: parseInt(qty) });
+          const gm = PRODUCTO_GRUPO[prod];
+          if(gm){
+            nuevosModelos.push({ grupoModelo: gm, modelo: detalle });
+            if(!MODELOS_POR_GRUPO[gm]) MODELOS_POR_GRUPO[gm] = [];
+            if(!MODELOS_POR_GRUPO[gm].includes(detalle)) MODELOS_POR_GRUPO[gm].push(detalle);
+          }
+          algoMarcado = true;
+        }
+        if(!marcados.length && !detalle){ ok=false; return; }
+      } else {
+        const qty = document.getElementById(`qty-${id}`)?.value;
+        if(!qty){ ok=false; return; }
+        registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: '', cantidad: parseInt(qty) });
+        algoMarcado = true;
       }
     } else {
-      modelo = modSel || detalle;
+      const chks = [...document.querySelectorAll(`#productos-chk-${id} input[type=checkbox]`)];
+      const marcados = chks.filter(c => c.checked);
+      marcados.forEach(chk => {
+        const idx = chks.indexOf(chk);
+        const qty = document.getElementById(`qtyp-${id}-${idx}`)?.value;
+        if(!qty){ ok=false; return; }
+        registros.push({ fecha, tienda, familia: fam, producto: chk.value, modelo: '', cantidad: parseInt(qty) });
+        algoMarcado = true;
+      });
+      const detalle = (document.getElementById(`modc-${id}`)?.value || '').trim();
+      if(detalle){
+        const qty = document.getElementById(`qty-otro-${id}`)?.value;
+        if(!qty){ ok=false; return; }
+        registros.push({ fecha, tienda, familia: fam, producto: detalle, modelo: '', cantidad: parseInt(qty) });
+        nuevosProductos.push({ familia: fam, producto: detalle });
+        if(!PRODUCTOS[fam]) PRODUCTOS[fam] = [];
+        if(!PRODUCTOS[fam].includes(detalle)) PRODUCTOS[fam].push(detalle);
+        algoMarcado = true;
+      }
+      if(!marcados.length && !detalle){ ok=false; return; }
     }
-
-    registros.push({ fecha, tienda, familia: fam, producto, modelo, cantidad: parseInt(qty) });
   });
-  if(!ok){ toast('Completá familia, producto y cantidad en cada faltante (y el detalle si elegiste "OTROS").'); return; }
+  if(!ok){ toast('Revisá los faltantes: falta completar una cantidad, o el detalle si escribiste "otro".'); return; }
+  if(!algoMarcado || !registros.length){ toast('Marcá al menos un producto o modelo faltante.'); return; }
 
   // Deduplicar por si dos faltantes de la misma carga escriben el mismo producto/modelo nuevo
   const dedupe = (arr, keyFn) => {
@@ -394,4 +471,3 @@ async function iniciarCarga() {
 var _hoy = new Date();
 document.getElementById('fecha').value = _hoy.getFullYear() + '-' + String(_hoy.getMonth()+1).padStart(2,'0') + '-' + String(_hoy.getDate()).padStart(2,'0');
 iniciarCarga();
-
