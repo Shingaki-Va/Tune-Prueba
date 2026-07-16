@@ -10,6 +10,18 @@ function modelosDe(prod) {
   if (!gm) return null;
   return MODELOS_POR_GRUPO[gm] || null;
 }
+/* Detecta productos tipo "Silicone case negra otras marcas", "Vidrio templado otras
+   marcas", etc. Para estos no hay lista de modelos (no tienen marca definida), así
+   que en vez de una lista de modelos pedimos Marca + Modelo como texto libre. */
+function esOtrasMarcas(prod){
+  return /otras marcas/i.test(prod || '');
+}
+/* Genera una clave de grupoModelo estable a partir de una marca escrita a mano
+   (sin tildes, en mayúsculas), para que la próxima vez que alguien escriba la
+   misma marca (con otra tipografía o acentos) quede agrupada junto a la anterior. */
+function grupoDesdeMarca(marca){
+  return normalizarBusqueda(marca).trim().toUpperCase();
+}
 
 /* Trae tiendas/productos/modelos desde el Apps Script (JSONP, evita problemas de CORS). */
 function cargarListas() {
@@ -284,6 +296,17 @@ function onProdUnico(id){
         ${renderMultiSelect(scopeId, mods, 'Elegí modelos...')}
       </div>
       ${filaOtro(id, 'modelo', 'Agregar modelo que no está en la lista', maxLongitud(mods))}`;
+  } else if(esOtrasMarcas(prod)){
+    detalle.innerHTML = `
+      <div class="field">
+        <label class="fld">Marca <span class="req">*</span></label>
+        <input type="text" id="marca-${id}" maxlength="30" placeholder="Ej: Baseus, Nillkin, etc.">
+      </div>
+      <div class="field" style="margin-top:14px;">
+        <label class="fld">Modelos <span class="req">*</span></label>
+        <div class="hint" style="margin-bottom:8px;">Agregá uno o varios modelos de esa marca, con su cantidad.</div>
+        ${filaOtro(id, 'modelo', 'Agregar modelo', 40)}
+      </div>`;
   } else {
     detalle.innerHTML = `
       <div class="field">
@@ -343,10 +366,23 @@ function puntajeCoincidencia(input, candidato){
   const nucleo = ratioEdicion(nucleoSinMarca(tokA), nucleoSinMarca(tokB));
   return Math.max(completo, nucleo);
 }
+/* Puntaje usado SOLO para mostrar sugerencias (más generoso que puntajeCoincidencia):
+   si lo que escribiste está contenido tal cual dentro del nombre del candidato
+   (ej. "teclado" dentro de "Teclado para Tablet"), sube el puntaje aunque la
+   diferencia de longitud total sea grande. No se usa para el bloqueo de typos,
+   que debe seguir siendo estricto para no confundir una abreviación válida con un error. */
+function puntajeSugerencia(input, candidato){
+  const base = puntajeCoincidencia(input, candidato);
+  const inputNorm = normalizarBusqueda(input).trim();
+  if(inputNorm.length >= 3 && normalizarBusqueda(candidato).includes(inputNorm)){
+    return Math.max(base, 0.9);
+  }
+  return base;
+}
 function mejoresCoincidencias(input, candidatos, max, umbral){
   if(!input || !candidatos || !candidatos.length) return [];
   return candidatos
-    .map(c => ({ c, p: puntajeCoincidencia(input, c) }))
+    .map(c => ({ c, p: puntajeSugerencia(input, c) }))
     .filter(x => x.p >= umbral)
     .sort((a,b) => b.p - a.p)
     .slice(0, max)
@@ -366,6 +402,27 @@ function onDetalleInput(id, tipo){
 function normalizarExacta(s){
   return normalizarBusqueda(s).replace(/\s+/g, ' ').trim();
 }
+/* Devuelve la lista de referencia (candidatos) para comparar un texto de "otro":
+   productos de la familia elegida, o modelos de la marca del producto elegido. */
+function candidatosPara(tipo, fam, prod){
+  if(tipo === 'producto') return PRODUCTOS[fam] || [];
+  const gm = PRODUCTO_GRUPO[prod];
+  return gm ? (MODELOS_POR_GRUPO[gm] || []) : [];
+}
+/* Si el texto escrito se parece MUCHÍSIMO a algo que ya existe (score muy alto,
+   no solo "parecido"), devuelve esa coincidencia — probablemente sea un error de
+   tipeo (ej. "telcado" en vez de "Teclado mecánico") y no un producto/modelo nuevo. */
+function posibleTypoDe(detalle, candidatos){
+  if(!detalle || !candidatos || !candidatos.length) return null;
+  const valNorm = normalizarExacta(detalle);
+  if(candidatos.some(c => normalizarExacta(c) === valNorm)) return null; // es exactamente ese, no es error
+  let mejor = null, mejorPuntaje = 0;
+  candidatos.forEach(c => {
+    const p = puntajeCoincidencia(detalle, c);
+    if(p > mejorPuntaje){ mejorPuntaje = p; mejor = c; }
+  });
+  return (mejor && mejorPuntaje >= 0.75) ? mejor : null;
+}
 function evaluarSugerencia(id, tipo){
   const campo = document.getElementById(`modc-${id}`);
   const sugBox = document.getElementById(`modc-sug-${id}`);
@@ -379,14 +436,8 @@ function evaluarSugerencia(id, tipo){
   // en ambos casos el ítem base (para leer familia/producto elegidos) es la primera parte.
   const baseId = String(id).split('-')[0];
   const fam = document.getElementById(`fam-${baseId}`)?.value;
-  let candidatos = [];
-  if(tipo === 'producto'){
-    candidatos = PRODUCTOS[fam] || [];
-  } else {
-    const prod = document.getElementById(`prod-${baseId}`)?.value;
-    const gm = PRODUCTO_GRUPO[prod];
-    candidatos = gm ? (MODELOS_POR_GRUPO[gm]||[]) : [];
-  }
+  const prod = document.getElementById(`prod-${baseId}`)?.value;
+  const candidatos = candidatosPara(tipo, fam, prod);
 
   // Si lo que escribieron ya existe tal cual en la lista (ignorando mayúsculas/tildes/espacios),
   // lo mostramos primero y con un título más directo, para evitar cargarlo de nuevo como "nuevo".
@@ -422,7 +473,7 @@ async function enviar(){
   const items = document.querySelectorAll('.item');
   if(!items.length){ toast('Agregá al menos un faltante.'); return; }
 
-  const registros = []; let ok = true; let algoMarcado = false;
+  const registros = []; let ok = true; let algoMarcado = false; let mensajeError = null;
   const nuevosProductos = []; // { familia, producto } escritos como "otro" (producto)
   const nuevosModelos = [];   // { grupoModelo, modelo } escritos como "otro" (modelo)
 
@@ -462,6 +513,8 @@ async function enviar(){
           const qty = row.querySelector('input[type=number]')?.value;
           if(!detalle && !qty) return; // fila vacía sin tocar, se ignora
           if(!detalle || !qty){ ok=false; return; }
+          const posibleTypo = posibleTypoDe(detalle, MODELOS_POR_GRUPO[PRODUCTO_GRUPO[prod]] || []);
+          if(posibleTypo){ ok=false; mensajeError = `"${detalle}" se parece mucho a "${posibleTypo}" — ¿fue un error de tipeo? Elegilo de las sugerencias, o corregí el texto si es realmente distinto.`; return; }
           registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: detalle, cantidad: parseInt(qty) });
           const gm = PRODUCTO_GRUPO[prod];
           if(gm){
@@ -472,6 +525,34 @@ async function enviar(){
           algoMarcado = true;
         });
         if(!chips.length && !filasOtroModelo.length){ ok=false; return; }
+      } else if(esOtrasMarcas(prod)){
+        const marca = (document.getElementById(`marca-${id}`)?.value || '').trim();
+        const filasModeloMarca = [...document.querySelectorAll(`#otros-lista-${id} .otro-row`)];
+        if(!marca || !filasModeloMarca.length){ ok=false; return; }
+
+        const productoFinal = prod.replace(/otras marcas/i, marca);
+        const grupo = grupoDesdeMarca(marca);
+        let huboModelo = false;
+
+        filasModeloMarca.forEach(row => {
+          const modeloTexto = (row.querySelector('input[type=text]')?.value || '').trim();
+          const qty = row.querySelector('input[type=number]')?.value;
+          if(!modeloTexto && !qty) return; // fila vacía sin tocar, se ignora
+          if(!modeloTexto || !qty){ ok=false; return; }
+          registros.push({ fecha, tienda, familia: fam, producto: productoFinal, modelo: modeloTexto, cantidad: parseInt(qty) });
+          nuevosModelos.push({ grupoModelo: grupo, modelo: modeloTexto });
+          if(!MODELOS_POR_GRUPO[grupo]) MODELOS_POR_GRUPO[grupo] = [];
+          if(!MODELOS_POR_GRUPO[grupo].includes(modeloTexto)) MODELOS_POR_GRUPO[grupo].push(modeloTexto);
+          algoMarcado = true;
+          huboModelo = true;
+        });
+
+        if(huboModelo){
+          nuevosProductos.push({ familia: fam, producto: productoFinal, grupoModelo: grupo });
+          if(!PRODUCTOS[fam]) PRODUCTOS[fam] = [];
+          if(!PRODUCTOS[fam].includes(productoFinal)) PRODUCTOS[fam].push(productoFinal);
+          PRODUCTO_GRUPO[productoFinal] = grupo;
+        }
       } else {
         const qty = document.getElementById(`qty-${id}`)?.value;
         if(!qty){ ok=false; return; }
@@ -492,6 +573,8 @@ async function enviar(){
         const qty = row.querySelector('input[type=number]')?.value;
         if(!detalle && !qty) return; // fila vacía sin tocar, se ignora
         if(!detalle || !qty){ ok=false; return; }
+        const posibleTypo = posibleTypoDe(detalle, PRODUCTOS[fam] || []);
+        if(posibleTypo){ ok=false; mensajeError = `"${detalle}" se parece mucho a "${posibleTypo}" — ¿fue un error de tipeo? Elegilo de las sugerencias, o corregí el texto si es realmente distinto.`; return; }
         registros.push({ fecha, tienda, familia: fam, producto: detalle, modelo: '', cantidad: parseInt(qty) });
         nuevosProductos.push({ familia: fam, producto: detalle });
         if(!PRODUCTOS[fam]) PRODUCTOS[fam] = [];
@@ -501,7 +584,7 @@ async function enviar(){
       if(!chips.length && !filasOtroProducto.length){ ok=false; return; }
     }
   });
-  if(!ok){ toast('Revisá los faltantes: falta completar una cantidad, o el detalle si escribiste "otro".'); return; }
+  if(!ok){ toast(mensajeError || 'Revisá los faltantes: falta completar una cantidad, o el detalle si escribiste "otro".'); return; }
   if(!algoMarcado || !registros.length){ toast('Marcá al menos un producto o modelo faltante.'); return; }
 
   // Deduplicar por si dos faltantes de la misma carga escriben el mismo producto/modelo nuevo
