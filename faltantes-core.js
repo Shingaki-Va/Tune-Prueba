@@ -43,7 +43,7 @@ const Backend = {
         const limpiar = ()=>{ try{ delete window[cb]; }catch(e){} if(s.parentNode) s.parentNode.removeChild(s); };
         window[cb] = (data)=>{ limpiar(); resolve(Array.isArray(data)?data:[]); };
         s.onerror = ()=>{ limpiar(); reject(new Error("No se pudo leer del servidor")); };
-        s.src = API_URL + "?action=list&callback=" + cb + "&t=" + Date.now();
+        s.src = API_URL + "?action=list&callback=" + cb + "&t=" + Date.now() + "&authuser=0";
         document.body.appendChild(s);
       });
     }

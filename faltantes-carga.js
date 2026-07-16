@@ -20,7 +20,7 @@ function cargarListas() {
     const limpiar = () => { try { delete window[cb]; } catch (e) {} if (s.parentNode) s.parentNode.removeChild(s); };
     window[cb] = (data) => { limpiar(); resolve(data); };
     s.onerror = () => { limpiar(); reject(new Error('No se pudo leer las listas del servidor')); };
-    s.src = API_URL + '?action=listas&callback=' + cb + '&t=' + Date.now();
+    s.src = API_URL + '?action=listas&callback=' + cb + '&t=' + Date.now() + '&authuser=0';
     document.body.appendChild(s);
   });
 }
