@@ -27,7 +27,7 @@ function render(){
   if(!DATA.length){
     c.innerHTML = `<div class="panel" style="border-radius:var(--r);border-top:1px solid var(--line);">
       <div class="empty"><div class="ic">📭</div><h3>Todavía no hay faltantes cargados</h3>
-      <p>Cuando las tiendas completen sus reportes en <a href="01_carga_tiendas.html">la página de carga</a>, vas a verlos acá.</p></div></div>`;
+      <p>Cuando las tiendas completen sus reportes en <a href="#" onclick="showView('carga');return false;">la página de carga</a>, vas a verlos acá.</p></div></div>`;
     return;
   }
 

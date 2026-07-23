@@ -23,15 +23,133 @@ function grupoDesdeMarca(marca){
   return normalizarBusqueda(marca).trim().toUpperCase();
 }
 
+/* --- Utilidades de calidad de datos (texto libre: Marca, Modelo, "otro") --- */
+
+function sanitizarTexto(texto){
+  return (texto || '').toString().replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function formatearTitleCase(texto){
+  return sanitizarTexto(texto).split(' ').map(palabra => {
+    if(!palabra) return palabra;
+    const soloLetras = palabra.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ]/g, '');
+    if(!soloLetras) return palabra;
+    const yaTieneMayuscula = /[A-ZÁÉÍÓÚÑ]/.test(palabra.slice(1));
+    if(yaTieneMayuscula) return palabra;
+    return palabra.charAt(0).toUpperCase() + palabra.slice(1).toLowerCase();
+  }).join(' ');
+}
+
+const TEXTOS_SIN_SENTIDO = new Set(['test','prueba','asdf','qwerty','asd','aaa','xxx','n/a','na','ninguno','nada','...','123','123456']);
+function esTextoSinSentido(texto){
+  const t = normalizarBusqueda(sanitizarTexto(texto));
+  if(!t) return true;
+  if(!/[a-z0-9]/i.test(t)) return true;
+  if(/^(.)\1+$/.test(t.replace(/\s/g,''))) return true;
+  if(TEXTOS_SIN_SENTIDO.has(t)) return true;
+  return false;
+}
+
+function marcarError(el){
+  if(el) el.classList.add('input-error');
+}
+function limpiarErrores(){
+  document.querySelectorAll('.input-error').forEach(el => el.classList.remove('input-error'));
+}
+
+function cantidadValida(v){
+  const s = (v === null || v === undefined) ? '' : String(v).trim();
+  if(!/^[0-9]+$/.test(s)) return false;
+  return parseInt(s, 10) >= 1;
+}
+
+function formularioListo(){
+  const fecha = document.getElementById('fecha')?.value;
+  const tienda = document.getElementById('tienda')?.value;
+  if(!fecha || !tienda) return false;
+  const items = document.querySelectorAll('.item');
+  if(!items.length) return false;
+  let listo = true;
+  items.forEach(it => {
+    const id = it.id.replace('it-', '');
+    const fam = document.getElementById(`fam-${id}`)?.value;
+    if(!fam){ listo = false; return; }
+    const tieneAlgo =
+      it.querySelector('.msel-chip input[type=number]') ||
+      it.querySelector('.otro-row input[type=number]') ||
+      it.querySelector('input[id^="qty-"]');
+    if(!tieneAlgo) listo = false;
+  });
+  return listo;
+}
+function actualizarEstadoBoton(){
+  const btn = document.getElementById('submit');
+  if(!btn || btn.textContent.indexOf('Guardando') !== -1) return;
+  btn.disabled = !formularioListo();
+}
+
+function hayDatosSinEnviar(){
+  const doneVisible = document.getElementById('done')?.style.display === 'block';
+  if(doneVisible) return false;
+  if(document.getElementById('tienda')?.value) return true;
+  const items = document.querySelectorAll('.item');
+  for(const it of items){
+    const id = it.id.replace('it-', '');
+    if(document.getElementById(`fam-${id}`)?.value) return true;
+  }
+  return false;
+}
+
+function recordarTienda(tienda){
+  try { localStorage.setItem('tune_ultima_tienda', tienda); } catch(e){}
+}
+function ultimaTiendaGuardada(){
+  try { return localStorage.getItem('tune_ultima_tienda') || ''; } catch(e){ return ''; }
+}
+
+function buscarDuplicadosEnEnvio(registros){
+  const vistos = {};
+  const repetidos = [];
+  registros.forEach(r => {
+    const clave = [r.familia, r.producto, r.modelo||''].join('|').toUpperCase();
+    vistos[clave] = (vistos[clave]||0) + 1;
+    if(vistos[clave] === 2) repetidos.push(`${r.producto}${r.modelo?' ('+r.modelo+')':''}`);
+  });
+  return repetidos;
+}
+
+window._enviosSesion = window._enviosSesion || new Set();
+function buscarDuplicadosDeSesion(registros){
+  const repetidos = [];
+  registros.forEach(r => {
+    const clave = [r.fecha, r.tienda, r.familia, r.producto, r.modelo||''].join('|').toUpperCase();
+    if(window._enviosSesion.has(clave)) repetidos.push(`${r.producto}${r.modelo?' ('+r.modelo+')':''}`);
+  });
+  return repetidos;
+}
+function registrarEnvioEnSesion(registros){
+  registros.forEach(r => {
+    const clave = [r.fecha, r.tienda, r.familia, r.producto, r.modelo||''].join('|').toUpperCase();
+    window._enviosSesion.add(clave);
+  });
+}
+
 /* Trae tiendas/productos/modelos desde el Apps Script (JSONP, evita problemas de CORS). */
 function cargarListas() {
   return new Promise((resolve, reject) => {
     if (!API_URL) { reject(new Error('Sin API_URL configurada')); return; }
     const cb = 'cbListas_' + Date.now() + '_' + Math.floor(Math.random() * 1e4);
     const s = document.createElement('script');
+    let resuelto = false;
     const limpiar = () => { try { delete window[cb]; } catch (e) {} if (s.parentNode) s.parentNode.removeChild(s); };
-    window[cb] = (data) => { limpiar(); resolve(data); };
-    s.onerror = () => { limpiar(); reject(new Error('No se pudo leer las listas del servidor')); };
+    const timeoutId = setTimeout(() => {
+      if (resuelto) return;
+      resuelto = true;
+      limpiar();
+      reject(new Error('El servidor tardó demasiado en responder.'));
+    }, 15000);
+    window[cb] = (data) => { if (resuelto) return; resuelto = true; clearTimeout(timeoutId); limpiar(); resolve(data); };
+    s.onerror = () => { if (resuelto) return; resuelto = true; clearTimeout(timeoutId); limpiar(); reject(new Error('No se pudo leer las listas del servidor')); };
     s.src = API_URL + '?action=listas&callback=' + cb + '&t=' + Date.now() + '&authuser=0';
     document.body.appendChild(s);
   });
@@ -66,7 +184,7 @@ function poblarDesde(data) {
     if (!MODELOS_POR_GRUPO[m.grupoModelo]) MODELOS_POR_GRUPO[m.grupoModelo] = [];
     MODELOS_POR_GRUPO[m.grupoModelo].push(m.modelo);
   });
-  Object.keys(MODELOS_POR_GRUPO).forEach(gm => MODELOS_POR_GRUPO[gm].sort(collator.compare));
+  Object.keys(MODELOS_POR_GRUPO).forEach(gm => MODELOS_POR_GRUPO[gm].sort((a,b) => collator.compare(b,a)));
 }
 
 // (FAM_COLOR, API_URL y Backend ahora viven en faltantes-core.js)
@@ -98,8 +216,27 @@ function addItem() {
     <div id="cuerpo-${id}"></div>`;
   document.getElementById('items').appendChild(div);
   document.getElementById(`fam-${id}`).focus();
+  actualizarContadorFaltantes();
+  actualizarEstadoBoton();
 }
-function rmItem(id){ const e=document.getElementById(`it-${id}`); if(e) e.remove(); }
+function rmItem(id){
+  const total = document.querySelectorAll('.item').length;
+  if(total <= 1){
+    toast('Necesitás al menos un faltante cargado.');
+    return;
+  }
+  if(!confirm('¿Quitar este faltante? Se va a perder lo que hayas cargado ahí.')) return;
+  const e=document.getElementById(`it-${id}`);
+  if(e) e.remove();
+  actualizarContadorFaltantes();
+  actualizarEstadoBoton();
+}
+function actualizarContadorFaltantes(){
+  const el = document.getElementById('contador-faltantes');
+  if(!el) return;
+  const total = document.querySelectorAll('.item').length;
+  el.textContent = total === 1 ? '1 faltante cargado' : `${total} faltantes cargados`;
+}
 
 /* Fila reutilizable para el campo opcional "¿falta otro X que no está en la lista?" */
 /* Calcula el límite de caracteres para el campo "otro", usando como referencia
@@ -134,14 +271,14 @@ function agregarFilaOtro(id, tipo, maxLen){
   row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;';
   row.innerHTML = `
     <div style="flex:1;">
-      <input type="text" id="modc-${rowId}" maxlength="${maxLen}" placeholder="Escribí acá..." oninput="onDetalleInput('${rowId}', '${tipo}')">
+      <input type="text" id="modc-${rowId}" maxlength="${maxLen}" placeholder="Escribí acá..." oninput="onDetalleInput('${rowId}', '${tipo}');this.classList.remove('input-error')" onblur="this.value=formatearTitleCase(this.value)">
       <div id="modc-sug-${rowId}" style="display:none;margin-top:8px;">
         <div id="modc-sug-titulo-${rowId}" style="font-size:11.5px;color:var(--ink-soft);margin-bottom:5px;">¿Alguno de estos?</div>
         <div id="modc-sug-chips-${rowId}" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
       </div>
     </div>
-    <input type="number" id="qty-otro-${rowId}" min="1" placeholder="Cant." style="width:80px;flex-shrink:0;">
-    <button type="button" onclick="quitarFilaOtro(${id}, '${rowId}')" title="Quitar" style="background:none;border:none;color:var(--ink-soft);cursor:pointer;font-size:20px;line-height:1;padding:8px 4px;flex-shrink:0;">×</button>`;
+    <input type="number" id="qty-otro-${rowId}" min="1" step="1" inputmode="numeric" placeholder="Cant." style="width:80px;flex-shrink:0;">
+    <button type="button" onclick="quitarFilaOtro(${id}, '${rowId}')" title="Quitar" style="background:none;border:none;color:var(--ink-soft);cursor:pointer;font-size:22px;line-height:1;padding:10px 12px;min-width:44px;flex-shrink:0;">×</button>`;
   lista.appendChild(row);
   document.getElementById(`modc-${rowId}`).focus();
   document.getElementById(`btn-otro-${id}`).textContent = '+ Agregar otro';
@@ -176,8 +313,8 @@ function renderMultiSelect(scopeId, opciones, placeholder){
         <input type="text" placeholder="Buscar..." oninput="filtrarMultiSelect('${scopeId}', this.value)" style="width:100%;padding:11px 12px;border:none;border-bottom:1px solid var(--line);font-family:'Inter',sans-serif;font-size:14px;outline:none;box-sizing:border-box;">
         <div id="msel-opciones-${scopeId}" style="max-height:240px;overflow-y:auto;">
           ${opciones.map(op => `
-            <label class="msel-opcion" data-texto="${normalizarBusqueda(op).replace(/"/g,'&quot;')}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer;">
-              <input type="checkbox" value="${op.replace(/"/g,'&quot;')}" onchange="onMultiSelectToggle('${scopeId}')">
+            <label class="msel-opcion" data-texto="${normalizarBusqueda(op).replace(/"/g,'&quot;')}" style="display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid var(--line);cursor:pointer;transition:background 0.12s;">
+              <input type="checkbox" value="${op.replace(/"/g,'&quot;')}" onchange="onMultiSelectToggle('${scopeId}');this.closest('label').style.background=this.checked?'var(--magenta-soft)':'';" style="width:20px;height:20px;flex-shrink:0;">
               <span style="font-size:14px;">${op}</span>
             </label>`).join('')}
         </div>
@@ -224,8 +361,8 @@ function renderChipsMultiSelect(scopeId){
     return `
       <div class="msel-chip" data-valor="${val.replace(/"/g,'&quot;')}" style="display:flex;align-items:center;gap:8px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;background:#FBFAFC;">
         <span style="flex:1;font-size:14px;">${val}</span>
-        <input type="number" min="1" placeholder="Cant." value="${cantidadPrevia}" style="width:74px;padding:7px 8px;border:1px solid var(--line-strong);border-radius:8px;font-family:'Inter',sans-serif;font-size:14px;">
-        <button type="button" onclick="quitarSeleccionMultiSelect('${scopeId}','${val.replace(/'/g,"\\'")}')" style="background:none;border:none;color:var(--ink-soft);cursor:pointer;font-size:19px;line-height:1;padding:0 3px;">×</button>
+        <input type="number" min="1" step="1" inputmode="numeric" placeholder="Cant." value="${cantidadPrevia}" style="width:74px;padding:7px 8px;border:1px solid var(--line-strong);border-radius:8px;font-family:'Inter',sans-serif;font-size:14px;">
+        <button type="button" onclick="quitarSeleccionMultiSelect('${scopeId}','${val.replace(/'/g,"\\'")}')" style="background:none;border:none;color:var(--ink-soft);cursor:pointer;font-size:22px;line-height:1;padding:10px 12px;min-width:44px;">×</button>
       </div>`;
   }).join('');
 }
@@ -244,7 +381,7 @@ function onFam(id){
         <label class="fld">Producto <span class="req">*</span></label>
         <select id="prod-${id}" onchange="onProdUnico(${id})">
           <option value="">Elegí producto...</option>
-          ${PRODUCTOS[fam].map(p=>`<option value="${p.replace(/"/g,'&quot;')}">${p}</option>`).join('')}
+          ${(PRODUCTOS[fam]||[]).map(p=>`<option value="${p.replace(/"/g,'&quot;')}">${p}</option>`).join('')}
           <option value="OTROS">OTROS (no está en la lista)</option>
         </select>
       </div>
@@ -270,18 +407,27 @@ function onProdUnico(id){
 
   if(prod === 'OTROS'){
     const maxLen = maxLongitud(PRODUCTOS[fam]);
+    const etiquetaTipo = fam === 'Vidrios' ? 'Ingrese tipo de vidrio/lámina' : 'Ingrese tipo de funda';
     detalle.innerHTML = `
       <div class="field">
-        <label class="fld">Ingrese otro producto <span class="req">*</span></label>
-        <input type="text" id="modc-${id}" maxlength="${maxLen}" placeholder="Escribí qué producto es..." oninput="onDetalleInput(${id}, 'producto')">
+        <label class="fld">${etiquetaTipo} <span class="req">*</span></label>
+        <input type="text" id="modc-${id}" maxlength="${maxLen}" placeholder="Escribí qué producto es..." oninput="onDetalleInput(${id}, 'producto');this.classList.remove('input-error')" onblur="this.value=formatearTitleCase(this.value)">
         <div id="modc-sug-${id}" style="display:none;margin-top:8px;">
           <div id="modc-sug-titulo-${id}" style="font-size:11.5px;color:var(--ink-soft);margin-bottom:5px;">¿Alguno de estos?</div>
           <div id="modc-sug-chips-${id}" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
         </div>
       </div>
-      <div class="field">
+      <div class="field" style="margin-top:14px;">
+        <label class="fld">Ingrese marca, si corresponde</label>
+        <input type="text" id="marcaotros-${id}" maxlength="30" placeholder="Ej: Huawei, Noblex, LG, Alcatel, etc." onblur="this.value=formatearTitleCase(this.value)">
+      </div>
+      <div class="field" style="margin-top:14px;">
+        <label class="fld">Ingrese modelo, si corresponde</label>
+        <input type="text" id="modelootros-${id}" maxlength="40" placeholder="Escribí el modelo (opcional)..." onblur="this.value=formatearTitleCase(this.value)">
+      </div>
+      <div class="field" style="margin-top:14px;">
         <label class="fld">Cantidad estimada perdida <span class="req">*</span></label>
-        <input type="number" id="qty-${id}" min="1" placeholder="0">
+        <input type="number" id="qty-${id}" min="1" step="1" inputmode="numeric" placeholder="0">
       </div>`;
     return;
   }
@@ -300,7 +446,7 @@ function onProdUnico(id){
     detalle.innerHTML = `
       <div class="field">
         <label class="fld">Marca <span class="req">*</span></label>
-        <input type="text" id="marca-${id}" maxlength="30" placeholder="Ej: Baseus, Nillkin, etc.">
+        <input type="text" id="marca-${id}" maxlength="30" placeholder="Ej: Huawei, Noblex, LG, Alcatel, etc." onblur="this.value=formatearTitleCase(this.value)">
       </div>
       <div class="field" style="margin-top:14px;">
         <label class="fld">Modelos <span class="req">*</span></label>
@@ -311,7 +457,7 @@ function onProdUnico(id){
     detalle.innerHTML = `
       <div class="field">
         <label class="fld">Cantidad estimada perdida <span class="req">*</span></label>
-        <input type="number" id="qty-${id}" min="1" placeholder="0">
+        <input type="number" id="qty-${id}" min="1" step="1" inputmode="numeric" placeholder="0">
       </div>`;
   }
 }
@@ -372,12 +518,21 @@ function puntajeCoincidencia(input, candidato){
    diferencia de longitud total sea grande. No se usa para el bloqueo de typos,
    que debe seguir siendo estricto para no confundir una abreviación válida con un error. */
 function puntajeSugerencia(input, candidato){
-  const base = puntajeCoincidencia(input, candidato);
+  let mejor = puntajeCoincidencia(input, candidato);
   const inputNorm = normalizarBusqueda(input).trim();
   if(inputNorm.length >= 3 && normalizarBusqueda(candidato).includes(inputNorm)){
-    return Math.max(base, 0.9);
+    mejor = Math.max(mejor, 0.9);
   }
-  return base;
+  // Nombres compuestos con "/" (ej. "Parlante Go 3/Go 4") representan variantes
+  // distintas; compara también contra cada mitad, porque el usuario puede estar
+  // buscando específicamente una de ellas ("go 4") y no el nombre completo.
+  if(candidato.includes('/')){
+    candidato.split('/').forEach(parte => {
+      const p = parte.trim();
+      if(p) mejor = Math.max(mejor, puntajeCoincidencia(input, p));
+    });
+  }
+  return mejor;
 }
 function mejoresCoincidencias(input, candidatos, max, umbral){
   if(!input || !candidatos || !candidatos.length) return [];
@@ -464,11 +619,27 @@ function usarSugerencia(id, valor){
   resetSugerencia(id);
 }
 
+let _enviandoAhora = false;
 async function enviar(){
-  const fecha = document.getElementById('fecha').value;
-  const tienda = document.getElementById('tienda').value;
-  if(!fecha){ toast('Completá la fecha.'); return; }
-  if(!tienda){ toast('Elegí tu tienda.'); return; }
+  if(_enviandoAhora) return; // evita doble envío si tocan el botón dos veces rápido
+  limpiarErrores();
+
+  const fechaEl = document.getElementById('fecha');
+  const tiendaEl = document.getElementById('tienda');
+  const fecha = fechaEl.value;
+  const tienda = tiendaEl.value;
+  if(!fecha){ marcarError(fechaEl); toast('Completá la fecha.'); return; }
+  if(!tienda){ marcarError(tiendaEl); toast('Elegí tu tienda.'); return; }
+
+  // Defensa extra por si el navegador no respetó el min/max del campo fecha.
+  const hoyStr = new Date().toISOString().slice(0,10);
+  const ayer = new Date(); ayer.setDate(ayer.getDate()-1);
+  const ayerStr = ayer.toISOString().slice(0,10);
+  if(fecha > hoyStr || fecha < ayerStr){
+    marcarError(fechaEl);
+    toast('La fecha tiene que ser hoy o ayer.');
+    return;
+  }
 
   const items = document.querySelectorAll('.item');
   if(!items.length){ toast('Agregá al menos un faltante.'); return; }
@@ -479,21 +650,44 @@ async function enviar(){
 
   items.forEach(it=>{
     const id = it.id.replace('it-','');
-    const fam = document.getElementById(`fam-${id}`)?.value;
-    if(!fam){ ok=false; return; }
+    const famEl = document.getElementById(`fam-${id}`);
+    const fam = famEl?.value;
+    if(!fam){ ok=false; marcarError(famEl); return; }
 
     if(fam === 'Seguridad' || fam === 'Vidrios'){
-      const prod = document.getElementById(`prod-${id}`)?.value;
-      if(!prod){ ok=false; return; }
+      const prodEl = document.getElementById(`prod-${id}`);
+      const prod = prodEl?.value;
+      if(!prod){ ok=false; marcarError(prodEl); return; }
 
       if(prod === 'OTROS'){
-        const detalle = (document.getElementById(`modc-${id}`)?.value || '').trim();
-        const qty = document.getElementById(`qty-${id}`)?.value;
-        if(!detalle || !qty){ ok=false; return; }
-        registros.push({ fecha, tienda, familia: fam, producto: detalle, modelo: '', cantidad: parseInt(qty) });
-        nuevosProductos.push({ familia: fam, producto: detalle });
+        const detalleEl = document.getElementById(`modc-${id}`);
+        const marcaEl = document.getElementById(`marcaotros-${id}`);
+        const modeloEl = document.getElementById(`modelootros-${id}`);
+        const qtyEl = document.getElementById(`qty-${id}`);
+        const detalle = sanitizarTexto(detalleEl?.value);
+        const marca = sanitizarTexto(marcaEl?.value);
+        const modeloTxt = sanitizarTexto(modeloEl?.value);
+        const qty = qtyEl?.value;
+
+        if(!detalle){ ok=false; marcarError(detalleEl); return; }
+        if(esTextoSinSentido(detalle)){ ok=false; marcarError(detalleEl); mensajeError = `"${detalle}" no parece un producto válido. Revisalo.`; return; }
+        if(marca && esTextoSinSentido(marca)){ ok=false; marcarError(marcaEl); mensajeError = `"${marca}" no parece una marca válida. Revisala.`; return; }
+        if(modeloTxt && esTextoSinSentido(modeloTxt)){ ok=false; marcarError(modeloEl); mensajeError = `"${modeloTxt}" no parece un modelo válido. Revisalo.`; return; }
+        if(!cantidadValida(qty)){ ok=false; marcarError(qtyEl); mensajeError = 'La cantidad tiene que ser un número entero de 1 o más.'; return; }
+
+        const grupo = marca ? grupoDesdeMarca(marca) : '';
+        const productoFinal = marca ? `${detalle} ${marca}` : detalle;
+
+        registros.push({ fecha, tienda, familia: fam, producto: productoFinal, modelo: modeloTxt, cantidad: parseInt(qty,10) });
+        nuevosProductos.push({ familia: fam, producto: productoFinal, grupoModelo: grupo });
         if(!PRODUCTOS[fam]) PRODUCTOS[fam] = [];
-        if(!PRODUCTOS[fam].includes(detalle)) PRODUCTOS[fam].push(detalle);
+        if(!PRODUCTOS[fam].includes(productoFinal)){ PRODUCTOS[fam].push(productoFinal); PRODUCTOS[fam].sort(collator.compare); }
+        if(marca) PRODUCTO_GRUPO[productoFinal] = grupo;
+        if(marca && modeloTxt){
+          nuevosModelos.push({ grupoModelo: grupo, modelo: modeloTxt });
+          if(!MODELOS_POR_GRUPO[grupo]) MODELOS_POR_GRUPO[grupo] = [];
+          if(!MODELOS_POR_GRUPO[grupo].includes(modeloTxt)){ MODELOS_POR_GRUPO[grupo].push(modeloTxt); MODELOS_POR_GRUPO[grupo].sort((a,b) => collator.compare(b,a)); }
+        }
         algoMarcado = true;
         return;
       }
@@ -502,47 +696,59 @@ async function enviar(){
       if(mods){
         const chips = [...document.querySelectorAll(`#msel-chips-mod-multi-${id} .msel-chip`)];
         chips.forEach(chip => {
-          const qty = chip.querySelector('input[type=number]')?.value;
-          if(!qty){ ok=false; return; }
-          registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: chip.dataset.valor, cantidad: parseInt(qty) });
+          const qtyEl = chip.querySelector('input[type=number]');
+          const qty = qtyEl?.value;
+          if(!cantidadValida(qty)){ ok=false; marcarError(qtyEl); mensajeError = 'La cantidad tiene que ser un número entero de 1 o más.'; return; }
+          registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: chip.dataset.valor, cantidad: parseInt(qty,10) });
           algoMarcado = true;
         });
         const filasOtroModelo = [...document.querySelectorAll(`#otros-lista-${id} .otro-row`)];
         filasOtroModelo.forEach(row => {
-          const detalle = (row.querySelector('input[type=text]')?.value || '').trim();
-          const qty = row.querySelector('input[type=number]')?.value;
+          const detalleEl = row.querySelector('input[type=text]');
+          const qtyEl = row.querySelector('input[type=number]');
+          const detalle = sanitizarTexto(detalleEl?.value);
+          const qty = qtyEl?.value;
           if(!detalle && !qty) return; // fila vacía sin tocar, se ignora
-          if(!detalle || !qty){ ok=false; return; }
+          if(!detalle){ ok=false; marcarError(detalleEl); return; }
+          if(!cantidadValida(qty)){ ok=false; marcarError(qtyEl); mensajeError = 'La cantidad tiene que ser un número entero de 1 o más.'; return; }
+          if(esTextoSinSentido(detalle)){ ok=false; marcarError(detalleEl); mensajeError = `"${detalle}" no parece un modelo válido. Revisalo.`; return; }
           const posibleTypo = posibleTypoDe(detalle, MODELOS_POR_GRUPO[PRODUCTO_GRUPO[prod]] || []);
-          if(posibleTypo){ ok=false; mensajeError = `"${detalle}" se parece mucho a "${posibleTypo}" — ¿fue un error de tipeo? Elegilo de las sugerencias, o corregí el texto si es realmente distinto.`; return; }
-          registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: detalle, cantidad: parseInt(qty) });
+          if(posibleTypo){ ok=false; marcarError(detalleEl); mensajeError = `"${detalle}" se parece mucho a "${posibleTypo}" — ¿fue un error de tipeo? Elegilo de las sugerencias, o corregí el texto si es realmente distinto.`; return; }
+          registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: detalle, cantidad: parseInt(qty,10) });
           const gm = PRODUCTO_GRUPO[prod];
           if(gm){
             nuevosModelos.push({ grupoModelo: gm, modelo: detalle });
             if(!MODELOS_POR_GRUPO[gm]) MODELOS_POR_GRUPO[gm] = [];
-            if(!MODELOS_POR_GRUPO[gm].includes(detalle)) MODELOS_POR_GRUPO[gm].push(detalle);
+            if(!MODELOS_POR_GRUPO[gm].includes(detalle)){ MODELOS_POR_GRUPO[gm].push(detalle); MODELOS_POR_GRUPO[gm].sort((a,b) => collator.compare(b,a)); }
           }
           algoMarcado = true;
         });
-        if(!chips.length && !filasOtroModelo.length){ ok=false; return; }
+        if(!chips.length && !filasOtroModelo.length){ ok=false; mensajeError = 'Elegí al menos un modelo, o agregá uno con "+ Agregar modelo".'; return; }
       } else if(esOtrasMarcas(prod)){
-        const marca = (document.getElementById(`marca-${id}`)?.value || '').trim();
+        const marcaEl = document.getElementById(`marca-${id}`);
+        const marca = sanitizarTexto(marcaEl?.value);
         const filasModeloMarca = [...document.querySelectorAll(`#otros-lista-${id} .otro-row`)];
-        if(!marca || !filasModeloMarca.length){ ok=false; return; }
+        if(!marca){ ok=false; marcarError(marcaEl); return; }
+        if(esTextoSinSentido(marca)){ ok=false; marcarError(marcaEl); mensajeError = `"${marca}" no parece una marca válida. Revisala.`; return; }
+        if(!filasModeloMarca.length){ ok=false; mensajeError = 'Agregá al menos un modelo de esa marca con "+ Agregar modelo".'; return; }
 
         const productoFinal = prod.replace(/otras marcas/i, marca);
         const grupo = grupoDesdeMarca(marca);
         let huboModelo = false;
 
         filasModeloMarca.forEach(row => {
-          const modeloTexto = (row.querySelector('input[type=text]')?.value || '').trim();
-          const qty = row.querySelector('input[type=number]')?.value;
+          const modeloEl = row.querySelector('input[type=text]');
+          const qtyEl = row.querySelector('input[type=number]');
+          const modeloTexto = sanitizarTexto(modeloEl?.value);
+          const qty = qtyEl?.value;
           if(!modeloTexto && !qty) return; // fila vacía sin tocar, se ignora
-          if(!modeloTexto || !qty){ ok=false; return; }
-          registros.push({ fecha, tienda, familia: fam, producto: productoFinal, modelo: modeloTexto, cantidad: parseInt(qty) });
+          if(!modeloTexto){ ok=false; marcarError(modeloEl); return; }
+          if(!cantidadValida(qty)){ ok=false; marcarError(qtyEl); mensajeError = 'La cantidad tiene que ser un número entero de 1 o más.'; return; }
+          if(esTextoSinSentido(modeloTexto)){ ok=false; marcarError(modeloEl); mensajeError = `"${modeloTexto}" no parece un modelo válido. Revisalo.`; return; }
+          registros.push({ fecha, tienda, familia: fam, producto: productoFinal, modelo: modeloTexto, cantidad: parseInt(qty,10) });
           nuevosModelos.push({ grupoModelo: grupo, modelo: modeloTexto });
           if(!MODELOS_POR_GRUPO[grupo]) MODELOS_POR_GRUPO[grupo] = [];
-          if(!MODELOS_POR_GRUPO[grupo].includes(modeloTexto)) MODELOS_POR_GRUPO[grupo].push(modeloTexto);
+          if(!MODELOS_POR_GRUPO[grupo].includes(modeloTexto)){ MODELOS_POR_GRUPO[grupo].push(modeloTexto); MODELOS_POR_GRUPO[grupo].sort((a,b) => collator.compare(b,a)); }
           algoMarcado = true;
           huboModelo = true;
         });
@@ -550,42 +756,69 @@ async function enviar(){
         if(huboModelo){
           nuevosProductos.push({ familia: fam, producto: productoFinal, grupoModelo: grupo });
           if(!PRODUCTOS[fam]) PRODUCTOS[fam] = [];
-          if(!PRODUCTOS[fam].includes(productoFinal)) PRODUCTOS[fam].push(productoFinal);
+          if(!PRODUCTOS[fam].includes(productoFinal)){ PRODUCTOS[fam].push(productoFinal); PRODUCTOS[fam].sort(collator.compare); }
           PRODUCTO_GRUPO[productoFinal] = grupo;
         }
       } else {
-        const qty = document.getElementById(`qty-${id}`)?.value;
-        if(!qty){ ok=false; return; }
-        registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: '', cantidad: parseInt(qty) });
+        const qtyEl = document.getElementById(`qty-${id}`);
+        const qty = qtyEl?.value;
+        if(!cantidadValida(qty)){ ok=false; marcarError(qtyEl); mensajeError = 'La cantidad tiene que ser un número entero de 1 o más.'; return; }
+        registros.push({ fecha, tienda, familia: fam, producto: prod, modelo: '', cantidad: parseInt(qty,10) });
         algoMarcado = true;
       }
     } else {
       const chips = [...document.querySelectorAll(`#msel-chips-prod-multi-${id} .msel-chip`)];
       chips.forEach(chip => {
-        const qty = chip.querySelector('input[type=number]')?.value;
-        if(!qty){ ok=false; return; }
-        registros.push({ fecha, tienda, familia: fam, producto: chip.dataset.valor, modelo: '', cantidad: parseInt(qty) });
+        const qtyEl = chip.querySelector('input[type=number]');
+        const qty = qtyEl?.value;
+        if(!cantidadValida(qty)){ ok=false; marcarError(qtyEl); mensajeError = 'La cantidad tiene que ser un número entero de 1 o más.'; return; }
+        registros.push({ fecha, tienda, familia: fam, producto: chip.dataset.valor, modelo: '', cantidad: parseInt(qty,10) });
         algoMarcado = true;
       });
       const filasOtroProducto = [...document.querySelectorAll(`#otros-lista-${id} .otro-row`)];
       filasOtroProducto.forEach(row => {
-        const detalle = (row.querySelector('input[type=text]')?.value || '').trim();
-        const qty = row.querySelector('input[type=number]')?.value;
+        const detalleEl = row.querySelector('input[type=text]');
+        const qtyEl = row.querySelector('input[type=number]');
+        const detalle = sanitizarTexto(detalleEl?.value);
+        const qty = qtyEl?.value;
         if(!detalle && !qty) return; // fila vacía sin tocar, se ignora
-        if(!detalle || !qty){ ok=false; return; }
+        if(!detalle){ ok=false; marcarError(detalleEl); return; }
+        if(!cantidadValida(qty)){ ok=false; marcarError(qtyEl); mensajeError = 'La cantidad tiene que ser un número entero de 1 o más.'; return; }
+        if(esTextoSinSentido(detalle)){ ok=false; marcarError(detalleEl); mensajeError = `"${detalle}" no parece un producto válido. Revisalo.`; return; }
         const posibleTypo = posibleTypoDe(detalle, PRODUCTOS[fam] || []);
-        if(posibleTypo){ ok=false; mensajeError = `"${detalle}" se parece mucho a "${posibleTypo}" — ¿fue un error de tipeo? Elegilo de las sugerencias, o corregí el texto si es realmente distinto.`; return; }
-        registros.push({ fecha, tienda, familia: fam, producto: detalle, modelo: '', cantidad: parseInt(qty) });
+        if(posibleTypo){ ok=false; marcarError(detalleEl); mensajeError = `"${detalle}" se parece mucho a "${posibleTypo}" — ¿fue un error de tipeo? Elegilo de las sugerencias, o corregí el texto si es realmente distinto.`; return; }
+        registros.push({ fecha, tienda, familia: fam, producto: detalle, modelo: '', cantidad: parseInt(qty,10) });
         nuevosProductos.push({ familia: fam, producto: detalle });
         if(!PRODUCTOS[fam]) PRODUCTOS[fam] = [];
-        if(!PRODUCTOS[fam].includes(detalle)) PRODUCTOS[fam].push(detalle);
+        if(!PRODUCTOS[fam].includes(detalle)){ PRODUCTOS[fam].push(detalle); PRODUCTOS[fam].sort(collator.compare); }
         algoMarcado = true;
       });
-      if(!chips.length && !filasOtroProducto.length){ ok=false; return; }
+      if(!chips.length && !filasOtroProducto.length){ ok=false; mensajeError = 'Elegí al menos un producto, o agregá uno con "+ Agregar".'; return; }
     }
   });
   if(!ok){ toast(mensajeError || 'Revisá los faltantes: falta completar una cantidad, o el detalle si escribiste "otro".'); return; }
   if(!algoMarcado || !registros.length){ toast('Marcá al menos un producto o modelo faltante.'); return; }
+
+  // Aviso (no bloquea) si alguna cantidad parece demasiado alta para un solo faltante.
+  const cantidadAlta = registros.find(r => r.cantidad > 50);
+  if(cantidadAlta){
+    const seguir = confirm(`"${cantidadAlta.producto}${cantidadAlta.modelo?' ('+cantidadAlta.modelo+')':''}" tiene una cantidad de ${cantidadAlta.cantidad}. ¿Confirmás que es correcta?`);
+    if(!seguir) return;
+  }
+
+  // Aviso (no bloquea) si el mismo producto/modelo aparece repetido dentro de este mismo envío.
+  const repetidosEnEnvio = buscarDuplicadosEnEnvio(registros);
+  if(repetidosEnEnvio.length){
+    const seguir = confirm(`Estás por cargar esto más de una vez en el mismo reporte:\n${repetidosEnEnvio.join('\n')}\n¿Confirmás que está bien así?`);
+    if(!seguir) return;
+  }
+
+  // Aviso (no bloquea) si ya cargaste lo mismo antes en esta sesión (misma fecha/tienda/producto/modelo).
+  const repetidosDeSesion = buscarDuplicadosDeSesion(registros);
+  if(repetidosDeSesion.length){
+    const seguir = confirm(`Ya cargaste esto antes hoy, en esta misma tienda:\n${repetidosDeSesion.join('\n')}\n¿Confirmás que hay que cargarlo de nuevo?`);
+    if(!seguir) return;
+  }
 
   // Deduplicar por si dos faltantes de la misma carga escriben el mismo producto/modelo nuevo
   const dedupe = (arr, keyFn) => {
@@ -595,16 +828,32 @@ async function enviar(){
   const nuevosProductosDedup = dedupe(nuevosProductos, x => x.familia + '|' + x.producto.toUpperCase());
   const nuevosModelosDedup = dedupe(nuevosModelos, x => x.grupoModelo + '|' + x.modelo.toUpperCase());
 
+  // Confirmación explícita antes de crear producto/marca/modelo nuevo (no hay lista contra la
+  // cual comparar en estos casos, así que conviene un paso extra antes de guardarlo para siempre).
+  if(nuevosProductosDedup.length || nuevosModelosDedup.length){
+    const resumen = [
+      ...nuevosProductosDedup.map(p => `Producto nuevo: "${p.producto}"`),
+      ...nuevosModelosDedup.map(m => `Modelo nuevo: "${m.modelo}"`)
+    ].join('\n');
+    const seguir = confirm(`Vas a agregar esto como nuevo en la lista, para todas las tiendas:\n${resumen}\n¿Confirmás?`);
+    if(!seguir) return;
+  }
+
+  _enviandoAhora = true;
   const btn = document.getElementById('submit');
   btn.disabled = true; btn.textContent = 'Guardando...';
 
   try {
     await Backend.saveRecords(registros, nuevosProductosDedup, nuevosModelosDedup);
+    recordarTienda(tienda);
+    registrarEnvioEnSesion(registros);
     mostrarDone(tienda, fecha, registros);
   } catch(err){
     console.error(err);
     btn.disabled=false; btn.textContent='Enviar reporte';
     toast('No se pudo guardar. Reintentá en un momento.');
+  } finally {
+    _enviandoAhora = false;
   }
 }
 
@@ -641,6 +890,9 @@ function poblarSelectTiendas() {
   const selT = document.getElementById('tienda');
   selT.innerHTML = '<option value="">Elegí tu tienda...</option>';
   TIENDAS.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t; selT.appendChild(o); });
+  const ultima = ultimaTiendaGuardada();
+  if(ultima && TIENDAS.includes(ultima)) selT.value = ultima;
+  selT.addEventListener('change', () => { if(selT.value) recordarTienda(selT.value); });
 }
 
 async function iniciarCarga() {
@@ -651,12 +903,46 @@ async function iniciarCarga() {
     document.getElementById('loading').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     addItem();
+    actualizarEstadoBoton();
   } catch (err) {
     console.error(err);
     document.getElementById('loading').style.display = 'none';
     document.getElementById('load-error').style.display = 'block';
   }
 }
+
+// Fecha: hoy por defecto, y limitada entre ayer y hoy (para no cargar fechas futuras o muy viejas por error).
 var _hoy = new Date();
-document.getElementById('fecha').value = _hoy.getFullYear() + '-' + String(_hoy.getMonth()+1).padStart(2,'0') + '-' + String(_hoy.getDate()).padStart(2,'0');
+var _fechaHoyStr = _hoy.getFullYear() + '-' + String(_hoy.getMonth()+1).padStart(2,'0') + '-' + String(_hoy.getDate()).padStart(2,'0');
+var _ayer = new Date(); _ayer.setDate(_hoy.getDate()-1);
+var _fechaAyerStr = _ayer.getFullYear() + '-' + String(_ayer.getMonth()+1).padStart(2,'0') + '-' + String(_ayer.getDate()).padStart(2,'0');
+document.getElementById('fecha').value = _fechaHoyStr;
+document.getElementById('fecha').setAttribute('min', _fechaAyerStr);
+document.getElementById('fecha').setAttribute('max', _fechaHoyStr);
+
+// Actualiza en vivo si el botón "Enviar reporte" puede habilitarse, ante cualquier
+// cambio dentro del formulario (delegado a nivel documento, cubre todos los campos
+// dinámicos sin necesidad de enganchar el listener uno por uno).
+document.addEventListener('input', function(e){
+  actualizarEstadoBoton();
+  if(e.target && e.target.classList) e.target.classList.remove('input-error');
+});
+document.addEventListener('change', actualizarEstadoBoton);
+
+// Enter en un campo de texto no debe disparar ningún envío accidental.
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'submit'){
+    e.preventDefault();
+  }
+});
+
+// Avisa antes de cerrar/recargar la pestaña si hay datos cargados sin enviar.
+window.addEventListener('beforeunload', function(e){
+  if(hayDatosSinEnviar()){
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
 iniciarCarga();
+

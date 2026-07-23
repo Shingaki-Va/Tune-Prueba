@@ -17,11 +17,18 @@ const Backend = {
 
   async saveRecords(registros, nuevosProductos, nuevosModelos){
     if(API_URL){
-      await fetch(API_URL, {
+      const resp = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify({ action: "add", registros: registros, nuevosProductos: nuevosProductos||[], nuevosModelos: nuevosModelos||[] })
       });
+      // El Apps Script siempre responde HTTP 200 aunque haya rechazado el envío,
+      // así que hay que leer el cuerpo para saber si realmente se guardó o no.
+      let data = null;
+      try { data = await resp.json(); } catch(e){ /* respuesta no leíble: seguimos con data=null */ }
+      if(data && data.ok === false){
+        throw new Error(data.error || 'El servidor rechazó el envío.');
+      }
       return true;
     }
     // Sin servidor: guarda en este navegador (sirve para probar)
@@ -40,9 +47,16 @@ const Backend = {
       return await new Promise((resolve, reject)=>{
         const cb = "cb_" + Date.now() + "_" + Math.floor(Math.random()*1e4);
         const s = document.createElement("script");
+        let resuelto = false;
         const limpiar = ()=>{ try{ delete window[cb]; }catch(e){} if(s.parentNode) s.parentNode.removeChild(s); };
-        window[cb] = (data)=>{ limpiar(); resolve(Array.isArray(data)?data:[]); };
-        s.onerror = ()=>{ limpiar(); reject(new Error("No se pudo leer del servidor")); };
+        const timeoutId = setTimeout(()=>{
+          if(resuelto) return;
+          resuelto = true;
+          limpiar();
+          reject(new Error("El servidor tardó demasiado en responder."));
+        }, 15000);
+        window[cb] = (data)=>{ if(resuelto) return; resuelto=true; clearTimeout(timeoutId); limpiar(); resolve(Array.isArray(data)?data:[]); };
+        s.onerror = ()=>{ if(resuelto) return; resuelto=true; clearTimeout(timeoutId); limpiar(); reject(new Error("No se pudo leer del servidor")); };
         s.src = API_URL + "?action=list&callback=" + cb + "&t=" + Date.now() + "&authuser=0";
         document.body.appendChild(s);
       });
